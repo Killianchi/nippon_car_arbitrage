@@ -127,47 +127,56 @@ def daily_stats(cfg: Config, jp_listings: list[JpListing], ch_listings: list[ChL
     return out
 
 
+def _windowed(rows: list[ModelStats], field: str, days: int
+              ) -> dict[str, tuple[ModelStats, ModelStats]]:
+    """Per model, the (baseline, latest) snapshots `days` apart.
+
+    The window is anchored to each model's own most recent snapshot, not to
+    the wall clock. Anchoring on `today` means that after a few days of failed
+    runs every model quietly reports "no movement" -- which is the worst
+    possible answer, because it looks like a calm market rather than stale
+    data.
+    """
+    by_key: dict[str, list[ModelStats]] = {}
+    for row in rows:
+        if getattr(row, field) is None:
+            continue
+        by_key.setdefault(row.watchlist_key, []).append(row)
+
+    out: dict[str, tuple[ModelStats, ModelStats]] = {}
+    for key, model_rows in by_key.items():
+        ordered = sorted(model_rows, key=lambda r: r.day)
+        if len(ordered) < 2:
+            continue
+        latest = ordered[-1]
+        try:
+            cutoff = (date.fromisoformat(latest.day) - timedelta(days=days)).isoformat()
+        except ValueError:
+            continue
+        earlier = [r for r in ordered if r.day <= cutoff]
+        out[key] = (earlier[-1] if earlier else ordered[0], latest)
+    return out
+
+
 def spread_moves(store: Store, *, days: int = 7) -> dict[str, float]:
     """Per-model change in spread over the last `days`, for the digest notes."""
     history = store.load_model_stats(days=days + 7)
-    by_key: dict[str, list[ModelStats]] = {}
-    for row in history:
-        by_key.setdefault(row.watchlist_key, []).append(row)
-
-    cutoff = (date.today() - timedelta(days=days)).isoformat()
-    moves: dict[str, float] = {}
-    for key, rows in by_key.items():
-        ordered = sorted((r for r in rows if r.spread_chf is not None), key=lambda r: r.day)
-        if len(ordered) < 2:
-            continue
-        earlier = [r for r in ordered if r.day <= cutoff]
-        baseline = earlier[-1] if earlier else ordered[0]
-        moves[key] = round(ordered[-1].spread_chf - baseline.spread_chf, 2)
-    return moves
+    return {
+        key: round(latest.spread_chf - baseline.spread_chf, 2)
+        for key, (baseline, latest) in _windowed(history, "spread_chf", days).items()
+    }
 
 
 def jp_price_moves(store: Store, *, days: int = 7) -> dict[str, float]:
     """Per-model fractional change in the JP median price."""
     history = store.load_model_stats(days=days + 7)
-    by_key: dict[str, list[ModelStats]] = {}
-    for row in history:
-        by_key.setdefault(row.watchlist_key, []).append(row)
-
-    cutoff = (date.today() - timedelta(days=days)).isoformat()
-    moves: dict[str, float] = {}
-    for key, rows in by_key.items():
-        ordered = sorted(
-            (r for r in rows if r.jp_median_price_chf), key=lambda r: r.day
-        )
-        if len(ordered) < 2:
-            continue
-        earlier = [r for r in ordered if r.day <= cutoff]
-        baseline = earlier[-1] if earlier else ordered[0]
+    out: dict[str, float] = {}
+    for key, (baseline, latest) in _windowed(history, "jp_median_price_chf", days).items():
         if not baseline.jp_median_price_chf:
             continue
-        moves[key] = round(
-            (ordered[-1].jp_median_price_chf - baseline.jp_median_price_chf)
+        out[key] = round(
+            (latest.jp_median_price_chf - baseline.jp_median_price_chf)
             / baseline.jp_median_price_chf,
             4,
         )
-    return moves
+    return out
