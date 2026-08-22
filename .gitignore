@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Local state / secrets
+.env
+*.db
+*.sqlite3
+data/
+.cache/
+evidence/
+out/
+service-account*.json
+firebase-*.json
+.firebase/
+
+# Node / dashboard
+node_modules/
+dashboard/dist/
+dashboard/.env
+dashboard/.env.local
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
