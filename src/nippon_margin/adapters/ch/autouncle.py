@@ -41,7 +41,7 @@ class AutoUncleAdapter(ChAdapter):
     def search_urls(self) -> Iterable[str]:
         for item in self.cfg.watchlist:
             make = _slug(item.make)
-            model = _slug(item.model)
+            model = item.ch_model_slug or _slug(item.model)
             if not (make and model):
                 continue
             for page in range(1, self.source_cfg.max_pages + 1):

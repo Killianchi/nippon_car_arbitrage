@@ -415,3 +415,43 @@ class TestTokenBoundaryMatching:
         slk = ch("slk", make="Mercedes-Benz", model="SLK 200", variant=None,
                  watchlist_key=None, year=2006, km=80_000)
         assert find_comps(cfg, sl, [slk], now=NOW) == []
+
+
+class TestMakeAgreement:
+    """A model alias must never match across manufacturers."""
+
+    def test_bmw_gran_turismo_is_not_a_maserati(self, cfg):
+        key = resolve_watchlist_key(
+            cfg, make="BMW", model="3 Series 320i Gran Turismo Sports"
+        )
+        assert key != "maserati_granturismo"
+
+    def test_the_real_maserati_still_matches(self, cfg):
+        assert resolve_watchlist_key(
+            cfg, make="Maserati", model="GranTurismo Sport"
+        ) == "maserati_granturismo"
+
+    def test_mercedes_spellings_are_interchangeable(self, cfg):
+        assert resolve_watchlist_key(cfg, make="Mercedes", model="G-Class") == "mercedes_g_class"
+        assert resolve_watchlist_key(cfg, make="MERCEDES BENZ", model="G Class") == "mercedes_g_class"
+
+    def test_alfa_spellings_are_interchangeable(self, cfg):
+        assert resolve_watchlist_key(
+            cfg, make="Alfa", model="Giulia Quadrifoglio"
+        ) == "alfa_giulia_qv"
+
+    def test_a_missing_make_does_not_block_a_match(self, cfg):
+        assert resolve_watchlist_key(cfg, make="", model="911 Carrera S") == "porsche_911"
+
+    def test_model_code_still_overrides_the_make_check(self, cfg):
+        """Codes are authoritative; a mangled make string must not veto them."""
+        assert resolve_watchlist_key(
+            cfg, make="MERCEDES-BENZ JAPAN", model="", model_code="463276"
+        ) == "mercedes_g_class"
+
+    def test_comps_reject_a_cross_make_match(self, cfg):
+        bmw = jp(make="BMW", model="Gran Turismo", model_code=None,
+                 watchlist_key=None, year=2013, mileage_km=80_000)
+        maser = ch("m", make="Maserati", model="GranTurismo", variant="Sport",
+                   watchlist_key=None, year=2013, km=80_000)
+        assert find_comps(cfg, bmw, [maser], now=NOW) == []

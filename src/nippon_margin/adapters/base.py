@@ -9,6 +9,7 @@ handled here, which is what keeps a new adapter to roughly 30 lines.
 from __future__ import annotations
 
 import logging
+import re
 from abc import ABC, abstractmethod
 from typing import Iterable
 from urllib.parse import urljoin
@@ -74,6 +75,16 @@ class Adapter(ABC):
         """CSS selector that signals a rendered page is ready. Override if useful."""
         return None
 
+    @staticmethod
+    def series_key(url: str) -> str:
+        """Group a URL with the other pages of the same query.
+
+        Used to stop paginating a query the moment it runs dry -- most of
+        these searches have far fewer results than `max_pages`, and walking
+        the empty tail costs 2 seconds a page for nothing.
+        """
+        return re.sub(r"([?&/])page(=|/)\d+", r"\1page\g<2>N", url)
+
     async def run(self) -> list:
         """Walk every search URL and return whatever parsed cleanly.
 
@@ -83,21 +94,36 @@ class Adapter(ABC):
         """
         out: list = []
         seen: set[str] = set()
+        exhausted: set[str] = set()
+        fetched = 0
+
         for url in self.search_urls():
+            key = self.series_key(url)
+            if key in exhausted:
+                continue
+
             html = await self.fetch_page(url)
+            fetched += 1
             if not html:
+                exhausted.add(key)
                 continue
             try:
                 items = self.parse_page(html, url)
             except Exception as exc:  # noqa: BLE001 - a site redesign is not fatal
                 log.exception("parse failed for %s (%s): %s", url, self.name, exc)
                 continue
+
+            added = 0
             for item in items:
                 if item.doc_id in seen:
                     continue
                 seen.add(item.doc_id)
                 out.append(item)
-        log.info("%s: %d listings from %d urls", self.name, len(out), len(list(self.search_urls())))
+                added += 1
+            if added == 0:
+                exhausted.add(key)
+
+        log.info("%s: %d listings from %d fetched pages", self.name, len(out), fetched)
         return out
 
 

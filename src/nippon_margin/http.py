@@ -55,12 +55,16 @@ class Fetcher:
 
     # -- lifecycle ----------------------------------------------------------
     async def __aenter__(self) -> Fetcher:
+        # User-Agent only, deliberately. Several of these sites run a bot
+        # challenge that fires on the *combination* of headers rather than the
+        # UA: beforward.jp answers a 2 KB stub with HTTP 202 the moment an
+        # explicit `Accept` header is present, and serves the real 795 KB
+        # stock list when it is absent. Anything extra goes in `extra_headers`
+        # per deployment rather than being baked in here.
+        headers = {"User-Agent": self.cfg.user_agent}
+        headers.update(getattr(self.cfg, "extra_headers", None) or {})
         self._client = httpx.AsyncClient(
-            headers={
-                "User-Agent": self.cfg.user_agent,
-                "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.9,de-CH;q=0.8,ja;q=0.7",
-            },
+            headers=headers,
             timeout=self.cfg.timeout_seconds,
             follow_redirects=True,
         )

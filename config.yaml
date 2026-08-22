@@ -131,8 +131,15 @@ alerts:
 # --- Sources ---------------------------------------------------------------
 # Every adapter can be disabled here without touching code.
 sources:
+  # Discard listings that do not resolve to a watchlist entry. Exporter
+  # make-level pages return hundreds of vans; storing them costs Firestore
+  # writes and buys nothing. Set false to build a broader catalog.
+  only_watchlist: true
   http:
-    user_agent: "nippon-margin/0.1 (+https://github.com/Killianchi/nippon_car_arbitrage) personal-research"
+    # Several of these sites serve a stub page (or 403) to non-browser agents,
+    # so we present a realistic desktop Chrome UA. Politeness is enforced by
+    # the throttle and the robots.txt check below, not by the UA string.
+    user_agent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     per_domain_delay_seconds: 2.0
     timeout_seconds: 30
     max_retries: 3
@@ -242,6 +249,8 @@ watchlist:
     aliases: ["R129", "R230", "SL500", "SL 500", "SL55", "SL 55 AMG", "SL600"]
     model_codes: ["R129", "R230", "129", "230"]
     body: convertible
+    # AutoUncle files these under `sl-class`; `/mercedes-benz/sl` 404s.
+    ch_model_slug: sl-class
     max_km: 160000
     min_grade: 3.5
 

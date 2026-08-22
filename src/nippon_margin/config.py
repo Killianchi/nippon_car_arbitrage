@@ -140,6 +140,9 @@ class HttpConfig(Base):
     respect_robots_txt: bool = True
     cache_dir: str = ".cache/html"
     cache_ttl_hours: float = 20.0
+    #: Extra request headers. Empty by default -- see Fetcher.__aenter__ for
+    #: why adding an `Accept` header breaks beforward.jp.
+    extra_headers: dict[str, str] = Field(default_factory=dict)
 
 
 class SourceConfig(Base):
@@ -151,6 +154,10 @@ class SourceConfig(Base):
 
 class SourcesConfig(Base):
     http: HttpConfig = Field(default_factory=HttpConfig)
+    #: Discard scraped listings that do not resolve to a watchlist entry.
+    #: A make-level page on an exporter returns hundreds of vans we will never
+    #: buy; storing them costs Firestore writes and buys nothing.
+    only_watchlist: bool = True
     japan: dict[str, SourceConfig] = Field(default_factory=dict)
     switzerland: dict[str, SourceConfig] = Field(default_factory=dict)
 
@@ -165,6 +172,9 @@ class WatchItem(Base):
     aliases: list[str] = Field(default_factory=list)
     model_codes: list[str] = Field(default_factory=list)
     body: str | None = None
+    #: AutoUncle/Autolina URL slug when it differs from `model`
+    #: (their SL lives at `mercedes-benz/sl-class`, not `.../sl`).
+    ch_model_slug: str | None = None
     max_km: int | None = None
     min_grade: float | None = None
     homologation_mfk_chf: float | None = None

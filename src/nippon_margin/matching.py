@@ -34,6 +34,7 @@ from .models import (
 __all__ = [
     "normalise",
     "contains_phrase",
+    "make_compatible",
     "resolve_watchlist_key",
     "find_comps",
     "comp_stats",
@@ -98,6 +99,12 @@ def resolve_watchlist_key(cfg: Config, *, make: str, model: str,
 
     best: tuple[int, str] | None = None
     for item in cfg.watchlist:
+        # The make has to agree. Without this a BMW 3 Series "320i Gran
+        # Turismo" matches the Maserati GranTurismo alias and gets priced
+        # against Maserati comps -- which is exactly the kind of nonsense
+        # that reads as a 400% margin at the top of the digest.
+        if not make_compatible(make, item.make):
+            continue
         for term in item.search_terms():
             t = normalise(term)
             if not t:
@@ -111,6 +118,31 @@ def resolve_watchlist_key(cfg: Config, *, make: str, model: str,
             if best is None or score > best[0]:
                 best = (score, item.key)
     return best[1] if best else None
+
+
+_MAKE_ALIASES = {
+    "mercedes": "mercedesbenz",
+    "mercedesbenz": "mercedesbenz",
+    "vw": "volkswagen",
+    "alfa": "alfaromeo",
+    "alfaromeo": "alfaromeo",
+}
+
+
+def make_compatible(listing_make: str | None, watch_make: str | None) -> bool:
+    """Do two make strings refer to the same manufacturer?
+
+    Permissive only where it is safe: an unnamed make on either side matches
+    anything (some exporters put the make only in the title), and the known
+    aliases below collapse `Mercedes` / `Mercedes-Benz` and `Alfa` /
+    `Alfa Romeo`. Everything else must agree.
+    """
+    a = re.sub(r"[^a-z]", "", (listing_make or "").lower())
+    b = re.sub(r"[^a-z]", "", (watch_make or "").lower())
+    if not a or not b:
+        return True
+    a, b = _MAKE_ALIASES.get(a, a), _MAKE_ALIASES.get(b, b)
+    return a == b
 
 
 def _watch_terms(cfg: Config, key: str | None) -> tuple[WatchItem | None, set[str]]:
@@ -140,10 +172,8 @@ def _same_model(cfg: Config, jp: JpListing, ch: ChListing) -> bool:
         if contains_phrase(ch_text, mapped.model) or contains_phrase(ch_text, mapped.variant):
             return True
 
-    if normalise(jp.make) and normalise(jp.make) != normalise(ch.make):
-        # Allow a make mismatch only when neither side names one.
-        if normalise(ch.make):
-            return False
+    if not make_compatible(jp.make, ch.make):
+        return False
     jp_model, ch_model = normalise(jp.model), normalise(ch.model)
     if not jp_model or not ch_model:
         return False
