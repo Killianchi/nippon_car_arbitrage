@@ -249,7 +249,8 @@ default — see *Adding a source* below.
 3. `autolina`, `carforyou`, `tutti`, `comparis` — polite, once-daily,
    disabled by default.
 4. `ricardo` — **completed** auctions, i.e. real transaction prices rather
-   than asking prices. Weekly cadence is enough.
+   than asking prices. The daily workflow runs this one on Sundays only;
+   enable it in `config.yaml` once you have confirmed its selectors.
 
 Every source can be disabled from `config.yaml` without touching code.
 

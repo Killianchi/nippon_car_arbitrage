@@ -72,6 +72,22 @@ jobs:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: nippon-margin analyze
 
+      - name: Weekly - Ricardo completed auctions
+        # Sundays only. Ricardo lists *completed* auctions, i.e. what cars
+        # actually sold for rather than what sellers asked -- the one thing
+        # asking prices cannot tell you. Weekly is plenty, and keeps us well
+        # inside a polite request budget.
+        if: ${{ !inputs.dry_run && !inputs.source }}
+        continue-on-error: true
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ "$(date -u +%u)" = "7" ]; then
+            nippon-margin scrape --source ricardo
+          else
+            echo "not Sunday; skipping Ricardo"
+          fi
+
       - name: Report
         if: ${{ !inputs.dry_run }}
         env:
