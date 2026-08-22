@@ -14,15 +14,15 @@ market for a month does not alert you thirty times.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from ..alerting import email as email_channel
+from ..alerting import telegram
 from ..config import Config
 from ..fx import pct_move
 from ..models import Opportunity
 from ..store.base import Store
-from ..alerting import email as email_channel
-from ..alerting import telegram
 from .analyze import jp_price_moves
 from .report import _chf, _pct, build_digest, render_markdown, weekly_portfolio
 
@@ -34,13 +34,13 @@ def _cooled_down(store: Store, key: str, *, days: int, now: datetime) -> bool:
     if last is None:
         return True
     if last.tzinfo is None:
-        last = last.replace(tzinfo=timezone.utc)
+        last = last.replace(tzinfo=UTC)
     return (now - last) >= timedelta(days=days)
 
 
 def select_alerts(cfg: Config, store: Store, *, now: datetime | None = None) -> list[tuple[str, str]]:
     """`[(cooldown_key, message)]` for everything worth sending right now."""
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     alerts: list[tuple[str, str]] = []
     thresholds = cfg.alerts
 
@@ -165,7 +165,7 @@ async def archive_evidence(cfg: Config, opportunities: list[Opportunity],
 
 def send_alerts(cfg: Config, store: Store, *, dry_run: bool = False,
                 weekly: bool = False, now: datetime | None = None) -> int:
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     alerts = select_alerts(cfg, store, now=now)
 
     if weekly:

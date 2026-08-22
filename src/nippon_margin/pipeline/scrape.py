@@ -12,7 +12,7 @@ import asyncio
 import logging
 import os
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from ..adapters.base import Adapter
 from ..adapters.registry import build_adapters
@@ -40,7 +40,7 @@ async def run_adapter(adapter: Adapter) -> tuple[AdapterResult, list]:
             ),
             listings,
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         log.error("%s timed out after %ss", adapter.name, ADAPTER_TIMEOUT_S)
         return (
             AdapterResult(source=adapter.name, ok=False, error=f"timeout after {ADAPTER_TIMEOUT_S}s",
@@ -58,7 +58,7 @@ async def run_adapter(adapter: Adapter) -> tuple[AdapterResult, list]:
 
 async def scrape(cfg: Config, store: Store, *, only: str | None = None,
                  dry_run: bool = False) -> RunRecord:
-    started = datetime.now(timezone.utc)
+    started = datetime.now(UTC)
     run = RunRecord(
         id=started.strftime("%Y%m%dT%H%M%SZ"),
         started_at=started,
@@ -91,8 +91,8 @@ async def scrape(cfg: Config, store: Store, *, only: str | None = None,
 
     if cfg.sources.only_watchlist:
         before_jp, before_ch = len(jp), len(ch)
-        jp = [l for l in jp if l.watchlist_key]
-        ch = [l for l in ch if l.watchlist_key]
+        jp = [lst for lst in jp if lst.watchlist_key]
+        ch = [lst for lst in ch if lst.watchlist_key]
         log.info(
             "watchlist filter: kept %d/%d JP and %d/%d CH listings",
             len(jp), before_jp, len(ch), before_ch,
@@ -112,19 +112,19 @@ async def scrape(cfg: Config, store: Store, *, only: str | None = None,
 
     if dry_run:
         log.info("dry run: parsed %d JP and %d CH listings, wrote nothing", len(jp), len(ch))
-        run.finished_at = datetime.now(timezone.utc)
+        run.finished_at = datetime.now(UTC)
         return run
 
     new_jp, upd_jp = store.upsert_jp(jp)
     new_ch, upd_ch = store.upsert_ch(ch)
     log.info("JP: %d new, %d updated | CH: %d new, %d updated", new_jp, upd_jp, new_ch, upd_ch)
 
-    cutoff = datetime.now(timezone.utc) - timedelta(days=cfg.catalog.delist_after_days)
+    cutoff = datetime.now(UTC) - timedelta(days=cfg.catalog.delist_after_days)
     delisted = store.mark_delisted(before=cutoff)
     if delisted:
         log.info("marked %d listings delisted (unseen for %d days)",
                  delisted, cfg.catalog.delist_after_days)
 
-    run.finished_at = datetime.now(timezone.utc)
+    run.finished_at = datetime.now(UTC)
     store.save_run(run)
     return run

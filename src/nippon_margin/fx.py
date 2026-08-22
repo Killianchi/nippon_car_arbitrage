@@ -9,7 +9,7 @@ fetched and forgotten.
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 from .http import Fetcher
 from .models import FxRate
@@ -40,7 +40,7 @@ async def fetch_fx(fetcher: Fetcher, *, day: date | None = None) -> FxRate | Non
         day=str(data.get("date") or (day or date.today()).isoformat()),
         usd_chf=round(1.0 / float(usd_per_chf), 6),
         jpy_chf=round(1.0 / float(jpy_per_chf), 8),
-        fetched_at=datetime.now(timezone.utc),
+        fetched_at=datetime.now(UTC),
     )
 
 

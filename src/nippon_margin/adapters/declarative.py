@@ -29,8 +29,8 @@ non-fatal -- rather than a crash that takes the other sources down with it.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Iterable
 
 from ..models import ChListing, JpListing, PriceTerms, SellerType, Steering
 from ..parse import (
@@ -122,7 +122,7 @@ class _DeclarativeMixin:
         values = [text_of(n.text()) for n in card.css(self.spec.spec_value)]
         return {
             label.rstrip(":").lower(): value
-            for label, value in zip(labels, values)
+            for label, value in zip(labels, values, strict=False)
             if label and value
         }
 

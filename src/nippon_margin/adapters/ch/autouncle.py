@@ -18,9 +18,9 @@ card by its *labels* ("Days listed", "CHF", "km") rather than its classes.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from typing import Iterable
+from datetime import UTC, datetime, timedelta
 
 from selectolax.parser import Node
 
@@ -103,16 +103,24 @@ class AutoUncleAdapter(ChAdapter):
 
         days_listed = _labelled_number(card_text, "Days listed")
 
+        # AutoUncle only prints a second CHF figure when the price was cut, so
+        # "no second figure" means "no cut", not "unknown". Recording a single
+        # point for those cars keeps them in the denominator of the cut rate --
+        # otherwise every model reads 100% cut and the liquidity score is
+        # uniformly depressed by a measurement artefact.
         history: list[PricePoint] = []
-        now = datetime.now(timezone.utc)
-        if previous_chf and price_chf and previous_chf > price_chf:
-            # AutoUncle shows the delta, not the date. Anchor the old price to
-            # the start of the listing so the cut is visible in the history.
-            started = now - timedelta(days=days_listed or 30)
-            history = [
-                PricePoint(at=started, price=previous_chf),
-                PricePoint(at=now, price=price_chf),
-            ]
+        now = datetime.now(UTC)
+        if price_chf:
+            if previous_chf and previous_chf > price_chf:
+                # AutoUncle shows the delta, not the date. Anchor the old price
+                # to the start of the listing so the cut sits in the history.
+                started = now - timedelta(days=days_listed or 30)
+                history = [
+                    PricePoint(at=started, price=previous_chf),
+                    PricePoint(at=now, price=price_chf),
+                ]
+            else:
+                history = [PricePoint(at=now, price=price_chf)]
 
         m = _CANTON.search(card_text)
         canton = m.group(1).strip() if m else None

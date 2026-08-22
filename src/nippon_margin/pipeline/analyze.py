@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import statistics
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 
 from ..config import Config
 from ..matching import build_opportunity, mark_duplicates
@@ -21,7 +21,7 @@ log = logging.getLogger(__name__)
 
 
 def analyze(cfg: Config, store: Store, *, now: datetime | None = None) -> list[Opportunity]:
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
 
     fx = store.latest_fx()
     if not fx:
@@ -83,21 +83,21 @@ def daily_stats(cfg: Config, jp_listings: list[JpListing], ch_listings: list[ChL
 
     for item in cfg.watchlist:
         jp_prices = [
-            l.price_usd * fx_usd_chf
-            for l in jp_listings
-            if l.watchlist_key == item.key and l.price_usd
+            lst.price_usd * fx_usd_chf
+            for lst in jp_listings
+            if lst.watchlist_key == item.key and lst.price_usd
         ]
         ch_prices = [
-            l.price_chf for l in ch_listings if l.watchlist_key == item.key and l.price_chf
+            lst.price_chf for lst in ch_listings if lst.watchlist_key == item.key and lst.price_chf
         ]
         model_opps = [o for o in opportunities if o.watchlist_key == item.key]
         landed = [
             o.landed_roro.landed_chf for o in model_opps if o.landed_roro
         ]
         days_listed = [
-            float(l.days_listed)
-            for l in ch_listings
-            if l.watchlist_key == item.key and l.days_listed is not None
+            float(lst.days_listed)
+            for lst in ch_listings
+            if lst.watchlist_key == item.key and lst.days_listed is not None
         ]
 
         jp_median = round(statistics.median(jp_prices), 2) if jp_prices else None

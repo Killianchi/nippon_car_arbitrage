@@ -10,7 +10,7 @@ watchlist.
 from __future__ import annotations
 
 import re
-from typing import Iterable
+from collections.abc import Iterable
 
 from ...models import JpListing, PriceTerms, Steering
 from ...parse import (

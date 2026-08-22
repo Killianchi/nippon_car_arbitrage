@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import html
 import logging
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 from ..config import Config
 from ..fx import margin_impact_chf, pct_move
@@ -52,7 +52,7 @@ def build_digest(cfg: Config, store: Store, *, top_n: int = 10) -> dict:
 
     return {
         "day": date.today().isoformat(),
-        "generated_at": datetime.now(timezone.utc),
+        "generated_at": datetime.now(UTC),
         "top": top,
         "total": len(opportunities),
         "by_tier": {

@@ -1,0 +1,45 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "opportunities",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "watchlist_key", "order": "ASCENDING" },
+        { "fieldPath": "opportunity_score", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "opportunities",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "capital_tier", "order": "ASCENDING" },
+        { "fieldPath": "opportunity_score", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "model_stats_daily",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "watchlist_key", "order": "ASCENDING" },
+        { "fieldPath": "day", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "listings_jp",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "last_seen", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "listings_ch",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "last_seen", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

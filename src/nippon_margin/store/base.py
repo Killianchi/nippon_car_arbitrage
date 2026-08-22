@@ -106,5 +106,5 @@ class Store(ABC):
         """Watchlist rows written by the dashboard editor, if any."""
         return None
 
-    def close(self) -> None:
-        ...
+    def close(self) -> None:  # noqa: B027 - optional teardown; Firestore needs none
+        """Release resources. SQLite closes its handle; Firestore has nothing to do."""

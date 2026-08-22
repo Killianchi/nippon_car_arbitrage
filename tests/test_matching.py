@@ -1,6 +1,6 @@
 """Comp matcher and scoring tests."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -23,7 +23,7 @@ from nippon_margin.models import (
     Steering,
 )
 
-NOW = datetime(2025, 3, 15, tzinfo=timezone.utc)
+NOW = datetime(2025, 3, 15, tzinfo=UTC)
 
 
 def jp(**kw) -> JpListing:
@@ -155,6 +155,25 @@ class TestCompStats:
     def test_days_listed_median(self, cfg):
         comps = [ch("a", days_listed=10), ch("b", days_listed=50), ch("c", days_listed=90)]
         assert comp_stats(comps).median_days_listed == 50.0
+
+    def test_a_single_price_point_counts_as_no_cut(self, cfg):
+        """AutoUncle only prints a second figure when the price was cut.
+
+        Treating "one point" as unknown made every model read 100% cut and
+        uniformly depressed liquidity scores.
+        """
+        cut = ch("cut", price_change_history=[
+            PricePoint(at=NOW - timedelta(days=20), price=200_000),
+            PricePoint(at=NOW, price=180_000),
+        ])
+        steady = [
+            ch(f"s{i}", price_change_history=[PricePoint(at=NOW, price=180_000)])
+            for i in range(3)
+        ]
+        assert comp_stats([cut, *steady]).pct_with_price_cut == 0.25
+
+    def test_comps_with_no_history_at_all_are_excluded(self, cfg):
+        assert comp_stats([ch("a"), ch("b")]).pct_with_price_cut is None
 
     def test_price_cut_fraction_uses_only_comps_with_history(self, cfg):
         cut = ch("cut", price_change_history=[

@@ -8,9 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
 
 import typer
 from dotenv import load_dotenv
@@ -50,11 +48,11 @@ def _setup(verbose: bool, config_path: str, local: bool, db: str | None):
 # --------------------------------------------------------------------------
 @app.command()
 def scrape(
-    source: Optional[str] = typer.Option(None, "--source", "-s",
+    source: str | None = typer.Option(None, "--source", "-s",
                                          help="Run one adapter only, even if disabled in config."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Parse and report, write nothing."),
     local: bool = typer.Option(False, "--local", help="Use SQLite instead of Firestore."),
-    db: Optional[str] = typer.Option(None, "--db", help="SQLite path (implies --local)."),
+    db: str | None = typer.Option(None, "--db", help="SQLite path (implies --local)."),
     config_path: str = typer.Option("config.yaml", "--config", "-c"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ):
@@ -93,7 +91,7 @@ def scrape(
 @app.command()
 def analyze(
     local: bool = typer.Option(False, "--local"),
-    db: Optional[str] = typer.Option(None, "--db"),
+    db: str | None = typer.Option(None, "--db"),
     config_path: str = typer.Option("config.yaml", "--config", "-c"),
     top: int = typer.Option(15, "--top", help="How many rows to print."),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
@@ -136,11 +134,11 @@ def analyze(
 
 @app.command()
 def report(
-    out: Optional[Path] = typer.Option(None, "--out", "-o", help="Write the HTML digest here."),
+    out: Path | None = typer.Option(None, "--out", "-o", help="Write the HTML digest here."),
     markdown: bool = typer.Option(False, "--markdown", help="Print Markdown to stdout."),
     top: int = typer.Option(10, "--top"),
     local: bool = typer.Option(False, "--local"),
-    db: Optional[str] = typer.Option(None, "--db"),
+    db: str | None = typer.Option(None, "--db"),
     config_path: str = typer.Option("config.yaml", "--config", "-c"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ):
@@ -170,7 +168,7 @@ def alert(
                                   help="Archive HTML + screenshots of alerted listings."),
     evidence_dir: Path = typer.Option(Path("evidence"), "--evidence-dir"),
     local: bool = typer.Option(False, "--local"),
-    db: Optional[str] = typer.Option(None, "--db"),
+    db: str | None = typer.Option(None, "--db"),
     config_path: str = typer.Option("config.yaml", "--config", "-c"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ):
@@ -198,7 +196,7 @@ def backfill(
     fx: bool = typer.Option(True, "--fx/--no-fx", help="Backfill ECB FX history."),
     days: int = typer.Option(90, "--days"),
     local: bool = typer.Option(False, "--local"),
-    db: Optional[str] = typer.Option(None, "--db"),
+    db: str | None = typer.Option(None, "--db"),
     config_path: str = typer.Option("config.yaml", "--config", "-c"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ):
@@ -229,7 +227,7 @@ def sources():
 @app.command()
 def doctor(
     local: bool = typer.Option(False, "--local"),
-    db: Optional[str] = typer.Option(None, "--db"),
+    db: str | None = typer.Option(None, "--db"),
     config_path: str = typer.Option("config.yaml", "--config", "-c"),
 ):
     """Check config, credentials and store connectivity before a real run."""
@@ -280,7 +278,7 @@ def doctor(
 def runs(
     limit: int = typer.Option(10, "--limit", "-n"),
     local: bool = typer.Option(False, "--local"),
-    db: Optional[str] = typer.Option(None, "--db"),
+    db: str | None = typer.Option(None, "--db"),
     config_path: str = typer.Option("config.yaml", "--config", "-c"),
 ):
     """Show recent run health -- per-adapter counts and errors."""

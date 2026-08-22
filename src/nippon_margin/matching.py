@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import re
 import statistics
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from .config import Config, WatchItem
 from .costs import capital_cost, compute_both
@@ -208,7 +208,7 @@ def _mileage_ok(cfg: Config, jp: JpListing, ch: ChListing) -> bool:
 def find_comps(cfg: Config, jp: JpListing, pool: list[ChListing],
                *, now: datetime | None = None) -> list[ChListing]:
     """Swiss comparables for one Japanese listing."""
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     cutoff = now - timedelta(days=cfg.matching.max_comp_age_days)
     out: list[ChListing] = []
     for ch in pool:
@@ -216,7 +216,7 @@ def find_comps(cfg: Config, jp: JpListing, pool: list[ChListing],
             continue
         last_seen = ch.last_seen
         if last_seen.tzinfo is None:
-            last_seen = last_seen.replace(tzinfo=timezone.utc)
+            last_seen = last_seen.replace(tzinfo=UTC)
         if last_seen < cutoff:
             continue
         if not _same_model(cfg, jp, ch):
@@ -249,11 +249,12 @@ def comp_stats(comps: list[ChListing]) -> CompStats:
         return CompStats(comp_count=0)
 
     days = [float(c.days_listed) for c in comps if c.days_listed is not None]
-    with_history = [c for c in comps if len(c.price_change_history) >= 2]
+    # A comp with a single recorded price point is evidence of "no cut", not
+    # absence of evidence -- see the note in the AutoUncle adapter. Only comps
+    # with no price history at all are excluded from the denominator.
+    observed = [c for c in comps if c.price_change_history]
     pct_cut = (
-        sum(1 for c in with_history if c.had_price_cut) / len(with_history)
-        if with_history
-        else None
+        sum(1 for c in observed if c.had_price_cut) / len(observed) if observed else None
     )
 
     return CompStats(
@@ -374,7 +375,7 @@ def build_opportunity(
     if not jp.price_usd or jp.price_usd <= 0 or fx_usd_chf <= 0:
         return None
 
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     terms = jp.price_terms if isinstance(jp.price_terms, PriceTerms) else PriceTerms.UNKNOWN
 
     roro, container = compute_both(

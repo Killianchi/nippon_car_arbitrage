@@ -16,7 +16,8 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 from ...models import JpListing, PriceTerms, Steering
 from ...parse import parse_grade, parse_steering, parse_transmission

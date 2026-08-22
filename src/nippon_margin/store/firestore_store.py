@@ -18,7 +18,7 @@ import hashlib
 import json
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from ..models import (
@@ -73,8 +73,8 @@ def _credentials():
 
 def _iso(dt: datetime) -> str:
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc).isoformat()
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC).isoformat()
 
 
 def _payload(model) -> dict[str, Any]:
@@ -218,7 +218,7 @@ class FirestoreStore(Store):
             )
             for doc in query.stream():
                 ops.append((doc.reference, {"status": ListingStatus.DELISTED.value,
-                                            "delisted_at": _iso(datetime.now(timezone.utc))}, True))
+                                            "delisted_at": _iso(datetime.now(UTC))}, True))
         self._commit(ops)
         return len(ops)
 
@@ -243,7 +243,7 @@ class FirestoreStore(Store):
         """One small doc the dashboard can open for a cheap first paint."""
         top = sorted(opportunities, key=lambda o: o.opportunity_score, reverse=True)[:20]
         summary = {
-            "generated_at": _iso(datetime.now(timezone.utc)),
+            "generated_at": _iso(datetime.now(UTC)),
             "total": len(opportunities),
             "by_tier": {
                 tier: sum(1 for o in opportunities if o.capital_tier == tier)
@@ -388,7 +388,7 @@ class FirestoreStore(Store):
 
 def _parse_dt(value: Any) -> datetime | None:
     if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        return value if value.tzinfo else value.replace(tzinfo=UTC)
     if isinstance(value, str):
         try:
             return datetime.fromisoformat(value)

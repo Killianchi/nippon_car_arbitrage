@@ -1,0 +1,130 @@
+name: daily
+
+on:
+  schedule:
+    # 05:00 UTC = 07:00 Zürich (CEST) / 06:00 (CET).
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+    inputs:
+      source:
+        description: "Run a single adapter only (blank = all enabled)"
+        required: false
+        type: string
+      dry_run:
+        description: "Parse and report, write nothing"
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: daily
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    # The whole cycle should take ~3 minutes; 15 is the budget before we
+    # assume something is hanging and would rather have a red run than a
+    # runner sitting on a dead socket.
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e '.[firestore,browser]'
+
+      - name: Install Playwright Chromium
+        # Only carused.jp may need a browser, and only if it stops
+        # server-rendering. Chromium alone, with its OS deps.
+        run: python -m playwright install --with-deps chromium
+
+      - name: Restore HTML cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .cache/html
+          key: html-cache-${{ github.run_id }}
+          restore-keys: html-cache-
+
+      - name: Scrape
+        id: scrape
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          nippon-margin scrape \
+            ${{ inputs.source && format('--source {0}', inputs.source) || '' }} \
+            ${{ inputs.dry_run && '--dry-run' || '' }}
+
+      - name: Analyze
+        # Even if a source broke, whatever landed is still worth pricing.
+        if: ${{ !inputs.dry_run }}
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: nippon-margin analyze
+
+      - name: Report
+        if: ${{ !inputs.dry_run }}
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: nippon-margin report --out out/digest.html
+
+      - name: Alert
+        if: ${{ !inputs.dry_run }}
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+        run: |
+          # Sunday also gets the capital-tier portfolio.
+          if [ "$(date -u +%u)" = "7" ]; then
+            nippon-margin alert --digest --weekly --evidence
+          else
+            nippon-margin alert --digest --evidence
+          fi
+
+      - name: Save HTML cache
+        # Keeps the next run's diffs cheap; always, so a failed run still
+        # leaves the pages behind for debugging.
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .cache/html
+          key: html-cache-${{ github.run_id }}
+
+      - name: Upload raw HTML (parse-failure debugging)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: raw-html-${{ github.run_id }}
+          path: .cache/html
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Upload digest and evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ github.run_id }}
+          path: |
+            out/
+            evidence/
+          retention-days: 30
+          if-no-files-found: ignore
+
+  deploy-dashboard:
+    needs: run
+    if: ${{ success() && !inputs.dry_run }}
+    uses: ./.github/workflows/deploy-dashboard.yml
+    secrets: inherit
