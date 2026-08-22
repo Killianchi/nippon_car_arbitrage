@@ -388,3 +388,30 @@ class TestDedupe:
     def test_short_or_junk_chassis_is_ignored(self):
         a = jp(source_ref="a", chassis_no="---")
         assert mark_duplicates([a])[a.doc_id] == (None, True)
+
+
+class TestTokenBoundaryMatching:
+    """Substring matching poisons the comp set; these are the cases that bite."""
+
+    def test_sl_does_not_match_slk(self, cfg):
+        assert resolve_watchlist_key(cfg, make="Mercedes-Benz", model="SLK 200") != "mercedes_sl"
+        assert resolve_watchlist_key(cfg, make="Mercedes-Benz", model="SL 500") == "mercedes_sl"
+
+    def test_quattroporte_is_not_a_granturismo(self, cfg):
+        """A `Sport GT S` Quattroporte used to match the GranTurismo watch entry."""
+        key = resolve_watchlist_key(
+            cfg, make="Maserati", model="Quattroporte Sport GT S"
+        )
+        assert key != "maserati_granturismo"
+
+    def test_a_real_granturismo_still_matches(self, cfg):
+        assert resolve_watchlist_key(
+            cfg, make="Maserati", model="GranTurismo Sport"
+        ) == "maserati_granturismo"
+
+    def test_comp_matching_rejects_a_token_lookalike(self, cfg):
+        sl = jp(make="Mercedes-Benz", model="SL", model_code="R230",
+                watchlist_key=None, year=2006, mileage_km=80_000)
+        slk = ch("slk", make="Mercedes-Benz", model="SLK 200", variant=None,
+                 watchlist_key=None, year=2006, km=80_000)
+        assert find_comps(cfg, sl, [slk], now=NOW) == []

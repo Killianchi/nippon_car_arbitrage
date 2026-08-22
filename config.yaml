@@ -258,7 +258,7 @@ watchlist:
   - key: maserati_granturismo
     make: Maserati
     model: GranTurismo
-    aliases: ["GranSport", "Gran Turismo", "GT S", "MC Stradale"]
+    aliases: ["GranSport", "Gran Turismo", "GranTurismo S", "MC Stradale"]
     model_codes: ["M145", "M138"]
     body: coupe
     max_km: 110000

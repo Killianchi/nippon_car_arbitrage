@@ -33,6 +33,7 @@ from .models import (
 
 __all__ = [
     "normalise",
+    "contains_phrase",
     "resolve_watchlist_key",
     "find_comps",
     "comp_stats",
@@ -56,6 +57,22 @@ def normalise(text: str | None) -> str:
 
 def _tokens(text: str | None) -> set[str]:
     return {t for t in normalise(text).split() if t}
+
+
+def contains_phrase(haystack: str, phrase: str) -> bool:
+    """Does `haystack` contain `phrase` as a whole-token run?
+
+    Substring matching is wrong here and quietly poisons the comp set:
+    `SL` matches `SLK 200`, `911` matches `1911`, and a Quattroporte
+    `Sport GT S` matches a GranTurismo alias. Token-run matching does not.
+    """
+    hay = normalise(haystack).split()
+    needle = normalise(phrase).split()
+    if not needle or len(needle) > len(hay):
+        return False
+    return any(
+        hay[i : i + len(needle)] == needle for i in range(len(hay) - len(needle) + 1)
+    )
 
 
 # --------------------------------------------------------------------------
@@ -85,9 +102,9 @@ def resolve_watchlist_key(cfg: Config, *, make: str, model: str,
             t = normalise(term)
             if not t:
                 continue
-            if t in haystack:
+            if contains_phrase(haystack, t):
                 score = len(t) + 100  # title matches beat description matches
-            elif len(t) >= 4 and t in desc:
+            elif len(t) >= 4 and contains_phrase(desc, t):
                 score = len(t)
             else:
                 continue
@@ -119,8 +136,8 @@ def _same_model(cfg: Config, jp: JpListing, ch: ChListing) -> bool:
 
     mapped = cfg.resolve_model_code(jp.model_code)
     if mapped:
-        ch_text = normalise(" ".join(filter(None, [ch.make, ch.model, ch.variant])))
-        if normalise(mapped.model) in ch_text or normalise(mapped.variant) in ch_text:
+        ch_text = " ".join(filter(None, [ch.make, ch.model, ch.variant]))
+        if contains_phrase(ch_text, mapped.model) or contains_phrase(ch_text, mapped.variant):
             return True
 
     if normalise(jp.make) and normalise(jp.make) != normalise(ch.make):
@@ -130,8 +147,10 @@ def _same_model(cfg: Config, jp: JpListing, ch: ChListing) -> bool:
     jp_model, ch_model = normalise(jp.model), normalise(ch.model)
     if not jp_model or not ch_model:
         return False
-    return jp_model in ch_model or ch_model in jp_model or bool(
-        _tokens(jp_model) & _tokens(ch_model)
+    return (
+        contains_phrase(ch_model, jp_model)
+        or contains_phrase(jp_model, ch_model)
+        or bool(_tokens(jp_model) & _tokens(ch_model))
     )
 
 
@@ -282,7 +301,7 @@ def risk_flags(cfg: Config, jp: JpListing, stats: CompStats) -> list[str]:
         " ".join(filter(None, [jp.make, jp.model, jp.variant, jp.model_code, jp.description]))
     )
     for rule in cfg.model_risk_flags:
-        if normalise(rule.match) and normalise(rule.match) in haystack:
+        if normalise(rule.match) and contains_phrase(haystack, rule.match):
             flags.append(rule.flag)
 
     seen: set[str] = set()
