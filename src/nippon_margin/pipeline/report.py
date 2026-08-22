@@ -203,11 +203,18 @@ def render_html(cfg: Config, digest: dict) -> str:
  h1 {{ font-size:1.25rem; margin:0 0 .25rem; }}
  .sub {{ color:var(--dim); font-size:.85rem; margin-bottom:1rem; }}
  .opp {{ border:1px solid var(--line); border-radius:8px; margin-bottom:.5rem; }}
- summary {{ display:grid; grid-template-columns:2ch 1fr auto; gap:.5rem; padding:.6rem .75rem; cursor:pointer; align-items:baseline; }}
- .rank {{ color:var(--dim); }}
- .name {{ font-weight:600; }}
- .score {{ color:var(--pos); font-variant-numeric:tabular-nums; }}
- .margin,.chf,.tier {{ color:var(--dim); font-size:.85rem; }}
+ /* Phone first: rank + name + score on one line, the rest wrapping onto a
+    second. A fixed grid here collapsed four columns into one and printed the
+    margin percentage on top of the francs. */
+ summary {{ display:flex; flex-wrap:wrap; align-items:baseline; column-gap:.6rem;
+            row-gap:.2rem; padding:.6rem .75rem; cursor:pointer; }}
+ .rank {{ color:var(--dim); width:2ch; flex:none; }}
+ .name {{ font-weight:600; flex:1 1 auto; min-width:0; }}
+ .score {{ color:var(--pos); font-variant-numeric:tabular-nums; flex:none; }}
+ .margin {{ flex-basis:100%; margin-left:calc(2ch + .6rem); }}
+ .margin,.chf,.tier {{ color:var(--dim); font-size:.85rem;
+                       font-variant-numeric:tabular-nums; }}
+ .body > details > summary {{ display:inline-block; padding:.4rem 0; }}
  .body {{ padding:0 .75rem .75rem; border-top:1px solid var(--line); }}
  .body img {{ max-width:100%; border-radius:6px; margin:.5rem 0; }}
  table.breakdown {{ width:100%; border-collapse:collapse; font-size:.85rem; margin:.5rem 0; }}
@@ -216,7 +223,10 @@ def render_html(cfg: Config, digest: dict) -> str:
  td.n {{ text-align:right; font-variant-numeric:tabular-nums; }}
  .flags li {{ color:#fbbf24; }}
  a {{ color:#60a5fa; }}
- @media (min-width:700px) {{ summary {{ grid-template-columns:2ch 1fr 6ch 6ch 8ch 5ch; }} }}
+ @media (min-width:700px) {{
+   summary {{ display:grid; grid-template-columns:2ch 1fr 6ch 7ch 9ch 6ch; gap:.5rem; }}
+   .margin {{ flex-basis:auto; margin-left:0; }}
+ }}
 </style></head><body>
 <h1>nippon-margin — {digest['day']}</h1>
 <p class="sub">{esc(fx_line)}<br>{esc(digest['fx_note'] or '')}</p>
