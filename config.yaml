@@ -1,0 +1,327 @@
+# ---------------------------------------------------------------------------
+# nippon-margin configuration
+#
+# This file is the source of truth for ALL business parameters.
+# Changing the watchlist or a cost assumption = a git commit, which gives you
+# full history of what you believed the numbers were on any given day.
+#
+# The dashboard's Watchlist page generates the `watchlist:` block below for you
+# to paste; it deliberately cannot write it, so a browser can never silently
+# change a tax rate or a shipping assumption.
+# ---------------------------------------------------------------------------
+
+meta:
+  timezone: Europe/Zurich
+  # Cloudflare Pages project name, used only for the deploy step's log line.
+  # The deploy target itself lives in .github/workflows/.
+  dashboard_project: nippon-margin
+
+# --- Landed cost engine ----------------------------------------------------
+costs:
+  # Shipping scenarios. Both are always computed so you can see the delta
+  # between "ship it alone now" and "wait for a 3-car container".
+  shipping:
+    roro_chf: 3500.0
+    container_chf_per_car: 2400.0
+    container_cars_per_load: 3
+
+  # Marine insurance as a % of (FOB + freight). Default 0 so the headline
+  # numbers match a plain FOB+freight CIF. Set to e.g. 0.005 if your forwarder
+  # charges it.
+  marine_insurance_pct: 0.0
+
+  # Japan-Switzerland FTA: passenger cars enter duty-free, BUT only against a
+  # valid certificate of origin from the Japanese exporter. If you cannot get
+  # one, set this to the MFN rate you would actually pay.
+  customs_duty_pct: 0.0
+  customs_duty_requires_certificate_of_origin: true
+
+  # Swiss automobile tax ("Automobilsteuer"), 4% of the customs value (CIF).
+  automobilsteuer_pct: 0.04
+
+  # Swiss VAT ("Einfuhrsteuer"), 8.1% on CIF + Automobilsteuer.
+  vat_pct: 0.081
+
+  # Certificate of Conformity, Form 13.20A, MFK inspection, small fixes.
+  homologation_mfk_chf: 2000.0
+
+  # Import agent fees, transport ex-port, detailing, unknown-unknowns.
+  agent_recon_buffer_chf: 800.0
+
+  # Optional flat customs clearance / forwarder handling fee.
+  customs_clearance_chf: 0.0
+
+# --- Cost of capital -------------------------------------------------------
+capital:
+  # Annual interest rate applied to landed cost over the expected holding
+  # period. Subtracted from gross margin to give net margin.
+  annual_interest_rate: 0.06
+  # Fallback holding period when the comp set gives no days-listed signal.
+  default_holding_days: 90
+  # Capital tiers used for the weekly "portfolio" summary and dashboard chips.
+  tiers:
+    - { name: "small",  max_chf: 30000 }
+    - { name: "mid",    max_chf: 80000 }
+    - { name: "large",  max_chf: null }
+
+# --- Comparable matching ---------------------------------------------------
+matching:
+  year_tolerance: 1            # +/- years
+  mileage_tolerance_pct: 0.30  # +/- 30%
+  min_comps_for_confidence: 3
+  # Realizable price = swiss_p25 * this factor (negotiation + selling costs).
+  realization_factor: 0.93
+  # Comps older than this many days are ignored.
+  max_comp_age_days: 120
+
+# --- Scoring ---------------------------------------------------------------
+scoring:
+  liquidity:
+    # Comp count saturates its contribution at this many comps.
+    comp_count_saturation: 12
+    # Days-listed that maps to a "neutral" (0.5) liquidity contribution.
+    days_listed_reference: 60
+    # Weights must sum to 1.0.
+    weights:
+      comp_count: 0.35
+      days_listed: 0.40
+      price_cuts: 0.25
+  # opportunity_score = margin_pct * liquidity_score / capital_weight
+  # capital_weight = (landed_chf / capital_weight_reference_chf) ** exponent
+  capital_weight_reference_chf: 50000.0
+  capital_weight_exponent: 1.0
+  # Seasonality multipliers applied to the opportunity score.
+  seasonality:
+    enabled: true
+    convertible:
+      months: [2, 3, 4, 5]
+      multiplier: 1.15
+    offroad_4x4:
+      months: [9, 10, 11]
+      multiplier: 1.12
+
+# --- Risk ------------------------------------------------------------------
+risk:
+  min_auction_grade: 4.0
+  penalise_rhd: true
+  # Multiplicative score haircut per risk flag raised (compounding).
+  flag_penalty: 0.92
+
+# --- Alerting --------------------------------------------------------------
+alerts:
+  opportunity_score_threshold: 0.35
+  min_margin_pct: 0.15
+  min_gross_margin_chf: 8000
+  # Fire when a tracked model's JP median price drops more than this w/w.
+  jp_price_drop_pct: 0.05
+  # Fire when JPY/CHF or USD/CHF moves more than this over 7 days.
+  fx_move_pct: 0.02
+  # Never send more than this many opportunity alerts in one run.
+  max_alerts_per_run: 10
+  # Re-alert on the same listing only after this many days.
+  cooldown_days: 7
+  channels:
+    telegram: true
+    email: false
+  email:
+    smtp_host: ""
+    smtp_port: 587
+    from_addr: ""
+    to_addr: ""
+
+# --- Sources ---------------------------------------------------------------
+# Every adapter can be disabled here without touching code.
+sources:
+  # Discard listings that do not resolve to a watchlist entry. Exporter
+  # make-level pages return hundreds of vans; storing them bloats the catalog
+  # and the dashboard snapshot. Set false to build a broader catalog.
+  only_watchlist: true
+  http:
+    # Several of these sites serve a stub page (or 403) to non-browser agents,
+    # so we present a realistic desktop Chrome UA. Politeness is enforced by
+    # the throttle and the robots.txt check below, not by the UA string.
+    user_agent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    per_domain_delay_seconds: 2.0
+    timeout_seconds: 30
+    max_retries: 3
+    respect_robots_txt: true
+    cache_dir: ".cache/html"
+    cache_ttl_hours: 20
+  japan:
+    exportfrom:      { enabled: true,  max_pages: 5,  renderer: "http" }
+    carused:         { enabled: true,  max_pages: 3,  renderer: "playwright" }
+    beforward:       { enabled: true,  max_pages: 3,  renderer: "http" }
+    sbtjapan:        { enabled: true,  max_pages: 3,  renderer: "http" }
+    japanpartner:    { enabled: false, max_pages: 2,  renderer: "http" }
+    tokyocarz:       { enabled: false, max_pages: 2,  renderer: "http" }
+    japanesecartrade: { enabled: false, max_pages: 2,  renderer: "http" }
+    tsexport:        { enabled: false, max_pages: 2,  renderer: "http" }
+  switzerland:
+    # AutoUncle aggregates AutoScout24 + Autolina + comparis and exposes
+    # days-listed and price-change history -- the highest value single source.
+    autouncle:  { enabled: true,  max_pages: 4,  renderer: "http" }
+    autolina:   { enabled: false, max_pages: 3,  renderer: "http" }
+    carforyou:  { enabled: false, max_pages: 3,  renderer: "http" }
+    tutti:      { enabled: false, max_pages: 3,  renderer: "http" }
+    comparis:   { enabled: false, max_pages: 3,  renderer: "playwright" }
+    # AutoScout24 direct scraping is deliberately absent: their ToS forbids it.
+    # If you obtain official partner/API access, add an adapter that uses it.
+    ricardo:    { enabled: false, max_pages: 3,  renderer: "http",
+                  note: "completed auctions; weekly cadence -- real transaction prices" }
+
+# --- Watchlist -------------------------------------------------------------
+# Each entry drives both the JP search queries and the CH comp queries.
+# `model_codes` feed the JP model_code -> CH variant mapping table.
+watchlist:
+  - key: mercedes_g_class
+    make: Mercedes-Benz
+    model: G-Class
+    aliases: ["G-Klasse", "Geländewagen", "G63", "G 63", "G500", "G 500", "W463", "AMG G"]
+    model_codes: ["463276", "W463", "463272", "463349"]
+    body: offroad_4x4
+    max_km: 90000
+    min_grade: 4.0
+    risk_notes: ["Check for CH-specific particulate filter compliance on pre-2015 diesels"]
+
+  - key: porsche_911
+    make: Porsche
+    model: "911"
+    aliases: ["996", "997", "991", "Carrera", "Turbo S", "GT3"]
+    model_codes: ["997M9701", "997M9702", "996", "991", "997"]
+    body: coupe
+    max_km: 120000
+    min_grade: 4.0
+    homologation_mfk_chf: 2500
+    risk_notes:
+      - "997.1: bore scoring inspection mandatory before bidding"
+      - "996: IMS bearing history required"
+
+  - key: porsche_cayenne
+    make: Porsche
+    model: Cayenne
+    aliases: ["Cayenne S", "Cayenne Turbo", "958", "957"]
+    model_codes: ["92A", "958", "957"]
+    body: suv
+    max_km: 150000
+    min_grade: 3.5
+
+  - key: porsche_macan
+    make: Porsche
+    model: Macan
+    aliases: ["Macan S", "Macan GTS", "95B"]
+    model_codes: ["95B"]
+    body: suv
+    max_km: 130000
+    min_grade: 4.0
+
+  - key: bmw_m3_e92
+    make: BMW
+    model: M3
+    aliases: ["E92", "E90 M3", "E93", "S65"]
+    model_codes: ["E92", "E90", "E93"]
+    body: coupe
+    max_km: 130000
+    min_grade: 4.0
+    risk_notes: ["S65 V8: rod bearing replacement history required"]
+
+  - key: bmw_850i_e31
+    make: BMW
+    model: 850i
+    aliases: ["E31", "850Ci", "8 Series", "840Ci"]
+    model_codes: ["E31"]
+    body: coupe
+    max_km: 200000
+    min_grade: 3.5
+    homologation_mfk_chf: 3000
+    risk_notes: ["E31: wiring loom and hydraulic ABS costs are brutal; budget extra"]
+
+  - key: abarth_695
+    make: Abarth
+    model: "695"
+    aliases: ["695 Biposto", "695 Tributo", "500 Abarth", "695 Rivale"]
+    model_codes: ["312"]
+    body: hatch
+    max_km: 80000
+    min_grade: 4.0
+
+  - key: mercedes_sl
+    make: Mercedes-Benz
+    model: SL
+    aliases: ["R129", "R230", "SL500", "SL 500", "SL55", "SL 55 AMG", "SL600"]
+    model_codes: ["R129", "R230", "129", "230"]
+    body: convertible
+    # AutoUncle files these under `sl-class`; `/mercedes-benz/sl` 404s.
+    ch_model_slug: sl-class
+    max_km: 160000
+    min_grade: 3.5
+
+  - key: mercedes_c63_w204
+    make: Mercedes-Benz
+    model: C63 AMG
+    aliases: ["W204", "C 63 AMG", "C63", "Black Series"]
+    model_codes: ["W204", "204077"]
+    body: sedan
+    max_km: 130000
+    min_grade: 4.0
+    risk_notes: ["M156: head bolt and cam lobe wear -- ask for service records"]
+
+  - key: maserati_granturismo
+    make: Maserati
+    model: GranTurismo
+    aliases: ["GranSport", "Gran Turismo", "GranTurismo S", "MC Stradale"]
+    model_codes: ["M145", "M138"]
+    body: coupe
+    max_km: 110000
+    min_grade: 4.0
+
+  - key: alfa_giulia_qv
+    make: Alfa Romeo
+    model: Giulia Quadrifoglio
+    aliases: ["Giulia QV", "Quadrifoglio", "952"]
+    model_codes: ["952"]
+    body: sedan
+    max_km: 100000
+    min_grade: 4.0
+
+# --- Model code -> Swiss variant name mapping ------------------------------
+# Japanese exporters list chassis/model codes; Swiss sites list marketing
+# names. This table bridges the two so comp matching actually finds anything.
+model_code_map:
+  "463276": { make: Mercedes-Benz, model: G-Class, variant: "G 63 AMG" }
+  "463272": { make: Mercedes-Benz, model: G-Class, variant: "G 550" }
+  "463349": { make: Mercedes-Benz, model: G-Class, variant: "G 350 d" }
+  "W463":   { make: Mercedes-Benz, model: G-Class, variant: "G-Class" }
+  "997M9701": { make: Porsche, model: "911", variant: "997 Carrera S" }
+  "997M9702": { make: Porsche, model: "911", variant: "997 Carrera 4S" }
+  "99603":  { make: Porsche, model: "911", variant: "996 Carrera" }
+  "99163":  { make: Porsche, model: "911", variant: "991 Carrera S" }
+  "204077": { make: Mercedes-Benz, model: C63 AMG, variant: "C 63 AMG" }
+  "E92":    { make: BMW, model: M3, variant: "M3 Coupé" }
+  "E93":    { make: BMW, model: M3, variant: "M3 Cabrio" }
+  "E31":    { make: BMW, model: 850i, variant: "850i" }
+  "R230":   { make: Mercedes-Benz, model: SL, variant: "SL 500" }
+  "R129":   { make: Mercedes-Benz, model: SL, variant: "SL 500" }
+  "95B":    { make: Porsche, model: Macan, variant: "Macan S" }
+  "92A":    { make: Porsche, model: Cayenne, variant: "Cayenne S" }
+  "M145":   { make: Maserati, model: GranTurismo, variant: "GranTurismo S" }
+  "952":    { make: Alfa Romeo, model: Giulia Quadrifoglio, variant: "Giulia Quadrifoglio" }
+
+# --- Model-specific risk table ---------------------------------------------
+# Matched against make/model/variant/description text of a JP listing.
+model_risk_flags:
+  - { match: "997.1",  flag: "bore scoring inspection" }
+  - { match: "997",    flag: "bore scoring inspection (997.1 only -- confirm build year)" }
+  - { match: "996",    flag: "IMS bearing" }
+  - { match: "E92",    flag: "S65 rod bearings" }
+  - { match: "M3",     flag: "S65 rod bearings (E9x only)" }
+  - { match: "E31",    flag: "wiring loom / hydraulic ABS" }
+  - { match: "M156",   flag: "head bolts + cam lobes" }
+  - { match: "C63",    flag: "M156 head bolts + cam lobes" }
+  - { match: "GranTurismo", flag: "variator rattle on early 4.2" }
+  - { match: "Cayenne", flag: "coolant pipes on 955/957 V8" }
+
+# --- Catalog behaviour -----------------------------------------------------
+catalog:
+  delist_after_days: 3
+  price_history_min_delta_chf: 50
+  archive_evidence_for_alerts: true

@@ -1,0 +1,192 @@
+name: daily
+
+on:
+  schedule:
+    # 05:00 UTC = 07:00 Zürich (CEST) / 06:00 (CET).
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+    inputs:
+      source:
+        description: "Run a single adapter only (blank = all enabled)"
+        required: false
+        type: string
+      dry_run:
+        description: "Parse and report, write nothing"
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  # The catalog is a single file force-pushed to the `data` branch. Two runs
+  # at once would silently discard one of their results.
+  group: daily
+  cancel-in-progress: false
+
+permissions:
+  contents: write   # push the encrypted catalog to the `data` branch
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    # The whole cycle takes ~3 minutes; 15 is the budget before we assume
+    # something is hanging and would rather have a red run than a runner
+    # sitting on a dead socket.
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e '.[browser]'
+
+      - name: Install Playwright Chromium
+        # Only needed if a source flips to renderer: playwright in config.yaml.
+        run: python -m playwright install --with-deps chromium
+
+      - name: Restore catalog
+        # Decrypts the SQLite database from the `data` branch. A wrong key
+        # fails here rather than silently starting from an empty catalog and
+        # throwing away every first_seen date and price-history point.
+        env:
+          DATA_ENCRYPTION_KEY: ${{ secrets.DATA_ENCRYPTION_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: nippon-margin sync pull
+
+      - name: Restore HTML cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .cache/html
+          key: html-cache-${{ github.run_id }}
+          restore-keys: html-cache-
+
+      - name: Scrape
+        run: |
+          nippon-margin scrape \
+            ${{ inputs.source && format('--source {0}', inputs.source) || '' }} \
+            ${{ inputs.dry_run && '--dry-run' || '' }}
+
+      - name: Weekly - Ricardo completed auctions
+        # Sundays only. Ricardo lists *completed* auctions, i.e. what cars
+        # actually sold for rather than what sellers asked -- the one thing
+        # asking prices cannot tell you. Weekly is plenty, and keeps us well
+        # inside a polite request budget.
+        if: ${{ !inputs.dry_run && !inputs.source }}
+        continue-on-error: true
+        run: |
+          if [ "$(date -u +%u)" = "7" ]; then
+            nippon-margin scrape --source ricardo
+          else
+            echo "not Sunday; skipping Ricardo"
+          fi
+
+      - name: Analyze
+        if: ${{ !inputs.dry_run }}
+        run: nippon-margin analyze
+
+      - name: Report
+        if: ${{ !inputs.dry_run }}
+        run: nippon-margin report --out out/digest.html
+
+      - name: Export dashboard data
+        if: ${{ !inputs.dry_run }}
+        run: nippon-margin export --out dashboard/public/data.json
+
+      - name: Alert
+        if: ${{ !inputs.dry_run }}
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+        run: |
+          # Sunday also gets the capital-tier portfolio.
+          if [ "$(date -u +%u)" = "7" ]; then
+            nippon-margin alert --digest --weekly --evidence
+          else
+            nippon-margin alert --digest --evidence
+          fi
+
+      - name: Persist catalog
+        # Encrypt and force-push. Runs even if a later step failed, so a
+        # partial scrape is still not lost -- but never on a dry run.
+        if: ${{ always() && !inputs.dry_run }}
+        env:
+          DATA_ENCRYPTION_KEY: ${{ secrets.DATA_ENCRYPTION_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: nippon-margin sync push -m "Catalog ${{ github.run_id }}"
+
+      - name: Check deploy credentials
+        id: cf
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          # `secrets` is not available in a job-level `if`, so gate on an
+          # output instead. Missing Cloudflare credentials should skip the
+          # deploy with a clear message, not fail a run whose scraping and
+          # alerting worked perfectly well.
+          if [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Cloudflare credentials not set -- skipping the dashboard deploy. Run ./scripts/setup.sh to configure them."
+          fi
+
+      - name: Set up Node
+        if: ${{ !inputs.dry_run && steps.cf.outputs.ready == 'true' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: Bundle dashboard
+        if: ${{ !inputs.dry_run && steps.cf.outputs.ready == 'true' }}
+        working-directory: dashboard
+        env:
+          VITE_REPO_SLUG: ${{ github.repository }}
+        run: |
+          npm ci
+          npm run build
+
+      - name: Deploy to Cloudflare Pages
+        if: ${{ !inputs.dry_run && steps.cf.outputs.ready == 'true' }}
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy dashboard/dist --project-name=nippon-margin --branch=main
+
+      - name: Save HTML cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .cache/html
+          key: html-cache-${{ github.run_id }}
+
+      - name: Upload raw HTML (parse-failure debugging)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: raw-html-${{ github.run_id }}
+          path: .cache/html
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Upload digest and evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ github.run_id }}
+          path: |
+            out/
+            evidence/
+          retention-days: 30
+          if-no-files-found: ignore
