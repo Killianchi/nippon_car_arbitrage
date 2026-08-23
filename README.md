@@ -8,7 +8,7 @@ It runs itself: a GitHub Actions cron scrapes Japanese exporter stock and
 Swiss classifieds every morning, computes the true landed cost of every
 Japanese car (freight, Automobilsteuer, VAT, homologation, MFK, the lot),
 matches each one against Swiss comparables, scores the spread, and pushes the
-best few to Telegram. A static dashboard on Cloudflare Pages is the daily read.
+best few to Telegram. A static dashboard on GitHub Pages is the daily read.
 
 ```
 Japanese exporters ─┐
@@ -23,7 +23,7 @@ ephemeral, so the catalog lives in this repository: one gzipped SQLite file,
 force-pushed to an orphan `data` branch each run. Set `DATA_ENCRYPTION_KEY`
 and it is AES-256-GCM encrypted instead — optional, and switching either way
 needs no migration. The dashboard is a plain static site that reads a JSON
-snapshot the run exports — no client SDK, no per-read billing.
+snapshot the run exports — no client SDK, no database, no third-party account.
 
 ---
 
@@ -119,28 +119,22 @@ one adapter, even if disabled in config), `--db PATH`, `--verbose`.
 
 ```bash
 gh auth login          # if you have not already
-wrangler login         # npm install -g wrangler
 ./scripts/setup.sh
-```
-
-That script does everything that can be done from a terminal: it offers to
-encrypt the catalog, prompts for the Telegram bot token and looks the chat id
-up for you, creates the Cloudflare Pages project, and configures the
-Cloudflare Access policy. Re-running it is safe — it never overwrites an
-existing secret, and never regenerates the encryption key.
-
-The only genuinely required secrets are the two Telegram ones and the two
-Cloudflare ones. Everything else is optional.
-
-Then:
-
-```bash
 gh workflow run daily.yml
 ```
 
-Verify it worked three ways: the `data` branch now holds `nippon.db.enc`, the
-Telegram digest arrives, and `https://nippon-margin.pages.dev` shows the
-Opportunities table with today's date in the header.
+That is the whole setup. The script sets the Telegram secrets (looking your
+chat id up for you) and offers to encrypt the catalog; the workflow enables
+GitHub Pages on the first run and deploys there itself. Re-running the script
+is safe — it never overwrites an existing secret.
+
+The only genuinely required secrets are the two Telegram ones, and even those
+are optional if you only want the dashboard.
+
+Verify it worked three ways: the `data` branch now holds `nippon.db.gz`, the
+Telegram digest arrives, and
+`https://killianchi.github.io/nippon_car_arbitrage/` shows the Opportunities
+table with today's date in the header.
 
 To pull the catalog down to your laptop afterwards:
 
@@ -179,30 +173,21 @@ the `data` branch and let the next run recreate it if that matters.
 | `DATA_ENCRYPTION_KEY` | *optional* — set it only if you want the catalog encrypted |
 | `TELEGRAM_BOT_TOKEN` | from [@BotFather](https://t.me/BotFather) → `/newbot` |
 | `TELEGRAM_CHAT_ID` | message your bot, then open `https://api.telegram.org/bot<TOKEN>/getUpdates` and read `result[0].message.chat.id` |
-| `CLOUDFLARE_API_TOKEN` | My Profile → API Tokens → Create Token → **Cloudflare Pages: Edit** |
-| `CLOUDFLARE_ACCOUNT_ID` | Workers & Pages → the ID in the sidebar |
 | `SMTP_USERNAME`, `SMTP_PASSWORD` | only if you enable email alerts |
 
 `GITHUB_TOKEN` is provided automatically; the workflow uses it to push the
 encrypted catalog, which is why `daily.yml` declares `contents: write`.
 
-**3. Create the Pages project and lock it down.**
+**3. Enable GitHub Pages.** The workflow does this itself on the first run
+(`actions/configure-pages` with `enablement: true`). If your repository
+settings block that, turn it on by hand: **Settings → Pages → Source: GitHub
+Actions**.
 
-```bash
-wrangler pages project create nippon-margin --production-branch=main
-```
-
-Then **Cloudflare dashboard → Zero Trust → Access → Applications → Add an
-application → Self-hosted**:
-
-- **Application domain**: `nippon-margin.pages.dev` (or your custom domain)
-- **Policy**: Action *Allow*, Include → *Emails* → your address only
-- Leave the default *Block* for everything else
-
-This part is not optional. The Pages project has no access control of its own;
-without the Access policy the dashboard is a public URL with your entire deal
-flow on it. Sign-in is a one-time email code per device, which on a phone is a
-single tap from the daily Telegram message. Both are free.
+The published URL is **public**. The page sends `noindex, nofollow` so it
+stays out of search results, but anyone who knows the address can read your
+opportunities and margins. If that stops being acceptable, the deploy job is
+the only thing that needs replacing — Cloudflare Pages behind Cloudflare
+Access, or any static host with auth, drops straight in.
 
 </details>
 
@@ -351,9 +336,10 @@ is worth having on disk.
 
 ## Cost, and what it runs on
 
-Nothing here bills. The full stack is a GitHub repository, GitHub Actions
-(~4 minutes a day, free for public repos), Cloudflare Pages with Access (free
-tier), and Telegram. There is no database service and no storage account.
+Nothing here bills, and there is no third-party account to create. The full
+stack is a GitHub repository, GitHub Actions (~4 minutes a day, free for
+public repos), GitHub Pages, and Telegram. No database service, no storage
+account, no hosting provider.
 
 The catalog stays small on purpose:
 
@@ -376,11 +362,13 @@ Today: a 2.8 MB catalog compresses to a ~250 KB encrypted blob.
   leaks nothing about how much changed day to day; tampering then fails the
   auth tag rather than decrypting to garbage. Either way the blob declares
   its own format, so switching needs no migration.
-- `dashboard/public/data.json` is the whole catalog in plaintext and is
-  **gitignored**. It is generated at build time and only ever served from
-  behind Cloudflare Access.
-- The dashboard is gated by Cloudflare Access, not by anything in the client
-  bundle. There is no auth code to get wrong.
+- `dashboard/public/data.json` is the whole catalog and is **gitignored**. It
+  is generated at build time and published with the site, so it is as public
+  as the dashboard is.
+- The dashboard is public. It carries `noindex, nofollow` and holds no
+  credentials, but it is readable by anyone with the URL. There is no auth
+  code in the bundle to get wrong because there is no auth; putting it behind
+  one means replacing the deploy job, not touching the app.
 - Credentials are redacted from every git error this tool raises, so a failed
   push cannot print a token into an Actions log.
 - Secrets are read from the environment only — never from `config.yaml`, so a
@@ -422,7 +410,7 @@ authenticate", which a mock would never catch.
 
 ```
 config.yaml                  every business parameter
-scripts/setup.sh             one-shot secrets + Cloudflare setup
+scripts/setup.sh             one-shot secrets setup
 src/nippon_margin/
   costs.py                   landed cost engine
   matching.py                comps, scoring, dedupe
@@ -434,7 +422,7 @@ src/nippon_margin/
   adapters/                  base + registry + per-source modules
   pipeline/                  scrape → analyze → report → alert → export
   store/                     SQLite catalog
-dashboard/                   Vite + React + Tailwind → Cloudflare Pages
+dashboard/                   Vite + React + Tailwind → GitHub Pages
 tests/fixtures/              frozen captures of real listing pages
 ```
 
@@ -457,6 +445,7 @@ tests/fixtures/              frozen captures of real listing pages
 - **The dashboard is as fresh as the last run**, not live. The header shows
   the snapshot age and turns amber past 36 hours, which is the signal that the
   daily workflow has stopped working.
+- **The dashboard URL is public.** Deliberate, for now — see Security posture.
 - **If you do encrypt, losing `DATA_ENCRYPTION_KEY` loses the catalog
   history.** The scraper rebuilds from scratch, but `first_seen` dates and
   price history do not come back. Keep a copy outside GitHub.
