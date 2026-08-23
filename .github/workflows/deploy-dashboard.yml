@@ -26,6 +26,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      pages_enabled: ${{ steps.pages_check.outputs.enabled }}
     steps:
       - uses: actions/checkout@v4
 
@@ -65,18 +67,39 @@ jobs:
           npm ci
           npm run build
 
+      - name: Check GitHub Pages is enabled
+        id: pages_check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # actions/configure-pages can *read* the Pages config but cannot
+          # create it: GITHUB_TOKEN has no `administration: write`, and that
+          # permission cannot be granted from the workflow. So enabling Pages
+          # is a genuine one-time human step, and this turns the otherwise
+          # cryptic "Resource not accessible by integration" into something
+          # actionable.
+          code=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/pages")
+          if [ "$code" = "200" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=GitHub Pages is not enabled::Enable it once at https://github.com/${{ github.repository }}/settings/pages -- set Source to 'GitHub Actions'. Then re-run this workflow. Nothing else is needed."
+          fi
+
       - uses: actions/configure-pages@v5
-        # Turns Pages on for the repository if it is not already, so there is
-        # no console step before the first deploy.
-        with:
-          enablement: true
+        if: ${{ steps.pages_check.outputs.enabled == 'true' }}
 
       - uses: actions/upload-pages-artifact@v3
+        if: ${{ steps.pages_check.outputs.enabled == 'true' }}
         with:
           path: dashboard/dist
 
   deploy:
     needs: build
+    if: ${{ needs.build.outputs.pages_enabled == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment:
