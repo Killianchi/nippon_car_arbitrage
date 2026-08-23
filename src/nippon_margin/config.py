@@ -67,6 +67,10 @@ class MatchingConfig(Base):
     min_comps_for_confidence: int = 3
     realization_factor: float = 0.93
     max_comp_age_days: int = 120
+    match_trim: bool = True
+    trims: list[str] = Field(default_factory=list)
+    #: Flag a comp set whose p75/p25 reaches this ratio. Set 0 to disable.
+    comp_spread_warn_ratio: float = 1.30
 
 
 class LiquidityWeights(Base):

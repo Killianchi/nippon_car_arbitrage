@@ -74,6 +74,45 @@ matching:
   # Comps older than this many days are ignored.
   max_comp_age_days: 120
 
+  # Trim ladders. A Cayenne Turbo and a base Cayenne are the same model, the
+  # same year and a CHF 15k different car, so a comp set that mixes them
+  # values both wrongly. When BOTH sides name a trim it must agree; when the
+  # Japanese listing does not name one -- which is most of them, their titles
+  # are terse -- comps are kept and the opportunity carries a risk flag
+  # instead, because absence of a trim is not evidence of a base model.
+  #
+  # Matched longest-first as whole tokens, so "Turbo S" wins over "Turbo"
+  # and "Carrera 4S" over "Carrera".
+  match_trim: true
+  # Only ~2% of Japanese listings name a trim, so "trim unknown" would flag
+  # almost every car and mean nothing. Instead, flag when the comps themselves
+  # disagree by this ratio (p75 / p25) -- that is the set actually mixing
+  # trims or conditions, and it is where the median stops being a price.
+  comp_spread_warn_ratio: 1.30
+  trims:
+    - "Turbo S"
+    - "Carrera 4 GTS"
+    - "Carrera 4S"
+    - "Carrera GTS"
+    - "Carrera S"
+    - "Carrera 4"
+    - "Carrera T"
+    - "Carrera"
+    - "GT3 RS"
+    - "GT2 RS"
+    - "GT3"
+    - "S E-Hybrid"
+    - "E-Hybrid"
+    - "Black Series"
+    - "Competition"
+    - "Quadrifoglio"
+    - "Biposto"
+    - "Targa"
+    - "GTS"
+    - "Turbo"
+    - "AMG"
+    - "S"
+
 # --- Scoring ---------------------------------------------------------------
 scoring:
   liquidity:

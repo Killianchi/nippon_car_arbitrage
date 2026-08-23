@@ -474,3 +474,97 @@ class TestMakeAgreement:
         maser = ch("m", make="Maserati", model="GranTurismo", variant="Sport",
                    watchlist_key=None, year=2013, km=80_000)
         assert find_comps(cfg, bmw, [maser], now=NOW) == []
+
+
+class TestTrimExtraction:
+    """Trim lives in free text on both sides, not in a designated column:
+    Japanese exporters write `Cayenne S` in the model, Swiss sites use a
+    variant field. Only ~2% of Japanese listings name one at all."""
+
+    @pytest.mark.parametrize("text,expected", [
+        ("Cayenne S", "s"),
+        ("Macan GTS", "gts"),
+        ("911 Turbo S", "turbo s"),
+        ("Carrera 4S", "carrera 4s"),
+        ("GT3 RS", "gt3 rs"),
+        ("Giulia Quadrifoglio", "quadrifoglio"),
+        ("C63 AMG", "amg"),
+    ])
+    def test_known_trims(self, cfg, text, expected):
+        from nippon_margin.matching import extract_trim
+
+        assert extract_trim(cfg, text) == expected
+
+    @pytest.mark.parametrize("text", ["Cayenne", "Macan", "911", "Porsche Cayenne Cayenne (3g)"])
+    def test_absent_trim_is_none(self, cfg, text):
+        from nippon_margin.matching import extract_trim
+
+        assert extract_trim(cfg, text) is None
+
+    def test_a_model_name_is_not_mistaken_for_a_trim(self, cfg):
+        """`GLS 400` must not read as an `S`; matching is whole-token."""
+        from nippon_margin.matching import extract_trim
+
+        assert extract_trim(cfg, "GLS 400") is None
+
+    def test_longer_trims_win(self, cfg):
+        from nippon_margin.matching import extract_trim
+
+        assert extract_trim(cfg, "911 Turbo S") == "turbo s"
+        assert extract_trim(cfg, "911 Turbo") == "turbo"
+
+
+class TestTrimMatching:
+    def _pair(self, jp_model, ch_variant):
+        return (
+            jp(make="Porsche", model=jp_model, model_code=None, watchlist_key="porsche_cayenne",
+               year=2018, mileage_km=100_000),
+            ch("c", make="Porsche", model="Cayenne", variant=ch_variant,
+               watchlist_key="porsche_cayenne", year=2018, km=100_000),
+        )
+
+    def test_a_differing_stated_trim_is_rejected(self, cfg):
+        """A Cayenne S is not comparable to a Cayenne Turbo."""
+        j, c = self._pair("Cayenne S", "Turbo")
+        assert find_comps(cfg, j, [c], now=NOW) == []
+
+    def test_a_matching_stated_trim_is_kept(self, cfg):
+        j, c = self._pair("Cayenne S", "S")
+        assert len(find_comps(cfg, j, [c], now=NOW)) == 1
+
+    def test_an_unstated_japanese_trim_keeps_every_comp(self, cfg):
+        """98% of Japanese listings say nothing; absence is not evidence."""
+        j, c = self._pair("Cayenne", "Turbo")
+        assert len(find_comps(cfg, j, [c], now=NOW)) == 1
+
+    def test_an_unstated_swiss_trim_keeps_the_comp(self, cfg):
+        j, c = self._pair("Cayenne S", None)
+        assert len(find_comps(cfg, j, [c], now=NOW)) == 1
+
+    def test_the_rule_can_be_turned_off(self, cfg):
+        off = cfg.model_copy(deep=True)
+        off.matching.match_trim = False
+        j, c = self._pair("Cayenne S", "Turbo")
+        assert len(find_comps(off, j, [c], now=NOW)) == 1
+
+
+class TestCompSpreadFlag:
+    def test_a_wide_spread_is_flagged(self, cfg):
+        stats = CompStats(comp_count=8, swiss_p25=40_000, swiss_p75=60_000)
+        flags = risk_flags(cfg, jp(), stats)
+        assert any("Comps disagree" in f for f in flags)
+
+    def test_a_tight_spread_is_not(self, cfg):
+        stats = CompStats(comp_count=8, swiss_p25=40_000, swiss_p75=42_000)
+        flags = risk_flags(cfg, jp(), stats)
+        assert not any("Comps disagree" in f for f in flags)
+
+    def test_the_threshold_is_configurable(self, cfg):
+        loose = cfg.model_copy(deep=True)
+        loose.matching.comp_spread_warn_ratio = 0
+        stats = CompStats(comp_count=8, swiss_p25=40_000, swiss_p75=90_000)
+        assert not any("Comps disagree" in f for f in risk_flags(loose, jp(), stats))
+
+    def test_no_comps_means_no_spread_flag(self, cfg):
+        flags = risk_flags(cfg, jp(), CompStats(comp_count=0))
+        assert not any("Comps disagree" in f for f in flags)
