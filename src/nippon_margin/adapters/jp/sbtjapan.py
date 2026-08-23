@@ -131,6 +131,8 @@ class SbtJapanAdapter(JpAdapter):
             price, terms = vehicle_price, PriceTerms.FOB
 
         specs = _spec_values(card)
+        location_node = card.css_first(".card-product__location-value")
+        location = text_of(location_node.text()) if location_node else None
         return JpListing(
             source=self.name,
             source_ref=ref,
@@ -147,6 +149,7 @@ class SbtJapanAdapter(JpAdapter):
             color=specs.get("color"),
             price_usd=price,
             price_terms=terms,
+            location=location,
             auction_grade=specs.get("grade"),
             description=title + " | " + " ".join(specs.get("raw", [])),
             image_urls=_images(card),

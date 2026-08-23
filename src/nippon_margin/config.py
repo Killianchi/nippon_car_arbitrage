@@ -20,10 +20,33 @@ class Base(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class OriginShipping(Base):
+    roro_chf: float | None = None
+    container_chf_per_car: float | None = None
+
+
 class ShippingConfig(Base):
     roro_chf: float = 3500.0
     container_chf_per_car: float = 2400.0
     container_cars_per_load: int = 3
+    #: Per-origin freight overrides, keyed by upper-case country. Japanese
+    #: exporters sell a lot of stock that is not in Japan, and the rates above
+    #: were quoted for Japan.
+    by_origin: dict[str, OriginShipping] = Field(default_factory=dict)
+
+    def for_origin(self, origin: str | None) -> tuple[float, float, bool]:
+        """(roro, container_per_car, is_default) for a country."""
+        if origin:
+            override = self.by_origin.get(origin.strip().upper())
+            if override:
+                return (
+                    override.roro_chf if override.roro_chf is not None else self.roro_chf,
+                    override.container_chf_per_car
+                    if override.container_chf_per_car is not None
+                    else self.container_chf_per_car,
+                    False,
+                )
+        return self.roro_chf, self.container_chf_per_car, True
 
 
 class CostsConfig(Base):
@@ -107,6 +130,8 @@ class ScoringConfig(Base):
 
 
 class RiskConfig(Base):
+    #: Country the cost assumptions were quoted for. Anything else is flagged.
+    assumed_origin: str = "JAPAN"
     min_auction_grade: float = 4.0
     penalise_rhd: bool = True
     #: Drop right-hand-drive listings outright rather than merely flagging

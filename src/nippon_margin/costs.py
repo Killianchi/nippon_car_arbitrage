@@ -30,12 +30,15 @@ from .models import CostBreakdown, PriceTerms, ShippingMode
 __all__ = ["compute_landed", "compute_both", "capital_cost", "freight_for"]
 
 
-def freight_for(cfg: Config, mode: ShippingMode) -> float:
-    """Per-car freight in CHF for the given shipping scenario."""
-    ship = cfg.costs.shipping
-    if mode is ShippingMode.RORO:
-        return float(ship.roro_chf)
-    return float(ship.container_chf_per_car)
+def freight_for(cfg: Config, mode: ShippingMode, origin: str | None = None) -> float:
+    """Per-car freight in CHF for a shipping scenario, from a given country.
+
+    Origin matters: a Japanese exporter's stock is not necessarily in Japan.
+    SBT lists most of its LHD Porsches in Incheon, and Incheon is not
+    Yokohama for either the freight rate or the paperwork.
+    """
+    roro, container, _ = cfg.costs.shipping.for_origin(origin)
+    return float(roro if mode is ShippingMode.RORO else container)
 
 
 def compute_landed(
@@ -46,6 +49,7 @@ def compute_landed(
     mode: ShippingMode,
     price_terms: PriceTerms = PriceTerms.FOB,
     watchlist_key: str | None = None,
+    origin: str | None = None,
 ) -> CostBreakdown:
     """Full cost breakdown for one car under one shipping scenario.
 
@@ -70,7 +74,14 @@ def compute_landed(
             f"so the {mode.value} freight assumption is not added."
         )
     else:
-        freight_chf = freight_for(cfg, mode)
+        freight_chf = freight_for(cfg, mode, origin)
+        _, _, using_default = cfg.costs.shipping.for_origin(origin)
+        if origin and origin.upper() != cfg.risk.assumed_origin and using_default:
+            notes.append(
+                f"Car is in {origin}, but the freight figure is the one quoted for "
+                f"{cfg.risk.assumed_origin}. Set costs.shipping.by_origin['{origin.upper()}'] "
+                f"once you have a real rate."
+            )
         if mode is ShippingMode.CONTAINER:
             notes.append(
                 f"Container rate assumes {c.shipping.container_cars_per_load}-car consolidation; "
@@ -87,8 +98,9 @@ def compute_landed(
     customs_duty_chf = cif_chf * c.customs_duty_pct
     if c.customs_duty_pct == 0 and c.customs_duty_requires_certificate_of_origin:
         notes.append(
-            "Duty-free under the Japan-Switzerland FTA -- REQUIRES a certificate of "
-            "origin from the Japanese exporter. Confirm before bidding."
+            f"Duty modelled at {c.customs_duty_pct:.0%}. Confirm the basis with your "
+            f"forwarder -- it is not the same question as which FTA applies, and the "
+            f"answer may differ for a car shipping from {origin or cfg.risk.assumed_origin}."
         )
 
     automobilsteuer_chf = cif_chf * c.automobilsteuer_pct
@@ -132,6 +144,7 @@ def compute_both(
     fx_usd_chf: float,
     price_terms: PriceTerms = PriceTerms.FOB,
     watchlist_key: str | None = None,
+    origin: str | None = None,
 ) -> tuple[CostBreakdown, CostBreakdown]:
     """(RoRo, container) breakdowns -- both scenarios are always visible."""
     kw = dict(
@@ -139,6 +152,7 @@ def compute_both(
         fx_usd_chf=fx_usd_chf,
         price_terms=price_terms,
         watchlist_key=watchlist_key,
+        origin=origin,
     )
     return (
         compute_landed(cfg, mode=ShippingMode.RORO, **kw),

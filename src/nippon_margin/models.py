@@ -79,6 +79,12 @@ class JpListing(Base):
     price_terms: PriceTerms = PriceTerms.UNKNOWN
     price_port: str | None = None
 
+    #: Where the car physically sits, as printed by the exporter
+    #: ("Incheon, SOUTH KOREA"). Japanese exporters sell plenty of stock that
+    #: is not in Japan, and shipping, paperwork and grading all follow the
+    #: car rather than the website.
+    location: str | None = None
+
     auction_grade: float | None = None
     repair_history: bool | None = None
 
@@ -115,6 +121,14 @@ class JpListing(Base):
     @property
     def doc_id(self) -> str:
         return make_doc_id(self.source, self.source_ref)
+
+    @property
+    def origin_country(self) -> str | None:
+        """Country from `location`, upper-cased, or None if not stated."""
+        if not self.location:
+            return None
+        tail = self.location.split(",")[-1].strip().upper()
+        return tail or None
 
     @property
     def chassis_prefix(self) -> str | None:
@@ -242,6 +256,7 @@ class Opportunity(Base):
     variant: str | None = None
     year: int | None = None
     mileage_km: int | None = None
+    location: str | None = None
     url: str = ""
     image_urls: list[str] = Field(default_factory=list)
 
