@@ -123,10 +123,15 @@ gh auth login          # if you have not already
 gh workflow run daily.yml
 ```
 
-That is the whole setup. The script sets the Telegram secrets (looking your
-chat id up for you) and offers to encrypt the catalog; the workflow enables
-GitHub Pages on the first run and deploys there itself. Re-running the script
-is safe — it never overwrites an existing secret.
+Plus one thing only you can do, once: **Settings → Pages → Source: GitHub
+Actions**. The workflow cannot enable Pages itself — `GITHUB_TOKEN` has no
+`administration: write`, and that permission cannot be granted from a
+workflow — so until you flip it the deploy steps skip with a warning telling
+you exactly this.
+
+The script sets the Telegram secrets (looking your chat id up for you) and
+offers to encrypt the catalog. Re-running it is safe — it never overwrites an
+existing secret.
 
 The only genuinely required secrets are the two Telegram ones, and even those
 are optional if you only want the dashboard.
@@ -178,10 +183,13 @@ the `data` branch and let the next run recreate it if that matters.
 `GITHUB_TOKEN` is provided automatically; the workflow uses it to push the
 encrypted catalog, which is why `daily.yml` declares `contents: write`.
 
-**3. Enable GitHub Pages.** The workflow does this itself on the first run
-(`actions/configure-pages` with `enablement: true`). If your repository
-settings block that, turn it on by hand: **Settings → Pages → Source: GitHub
-Actions**.
+**3. Enable GitHub Pages.** **Settings → Pages → Source: GitHub Actions.**
+
+This one is unavoidably manual. `actions/configure-pages` can read the Pages
+config but cannot create it: creating a Pages site needs
+`administration: write`, which `GITHUB_TOKEN` does not have and which a
+workflow cannot request. Until Pages is on, both workflows detect it and skip
+the deploy with a warning rather than failing.
 
 The published URL is **public**. The page sends `noindex, nofollow` so it
 stays out of search results, but anyone who knows the address can read your

@@ -142,9 +142,22 @@ fi
 # ---------------------------------------------------------------------------
 bold ""
 bold "3. Dashboard"
-echo "  The dashboard publishes to GitHub Pages straight from the workflow."
-echo "  Nothing to configure here: the first run turns Pages on and deploys to"
-echo "    https://$(echo "$REPO" | cut -d/ -f1 | tr 'A-Z' 'a-z').github.io/$(echo "$REPO" | cut -d/ -f2)/"
+PAGES_URL="https://$(echo "$REPO" | cut -d/ -f1 | tr 'A-Z' 'a-z').github.io/$(echo "$REPO" | cut -d/ -f2)/"
+echo "  The dashboard publishes to GitHub Pages from the workflow, at"
+echo "    $PAGES_URL"
+echo
+if curl -sS -o /dev/null -w '%{http_code}' \
+     -H "Authorization: Bearer $(gh auth token)" \
+     "https://api.github.com/repos/$REPO/pages" 2>/dev/null | grep -q 200; then
+  ok "GitHub Pages is already enabled"
+else
+  warn "GitHub Pages is NOT enabled yet, and a workflow cannot enable it"
+  warn "(creating a Pages site needs admin rights GITHUB_TOKEN does not have)."
+  warn "Turn it on once, then the deploys work:"
+  echo "    https://github.com/$REPO/settings/pages   →  Source: GitHub Actions"
+  echo
+  read -rp "  Press enter once you have set it (or to skip for now). " _
+fi
 echo
 warn "That URL is public. The page carries a noindex header so it stays out of"
 warn "search results, but anyone who knows the address can read your"
