@@ -35,6 +35,7 @@ __all__ = [
     "normalise",
     "contains_phrase",
     "make_compatible",
+    "extract_trim",
     "resolve_watchlist_key",
     "find_comps",
     "comp_stats",
@@ -145,6 +146,44 @@ def make_compatible(listing_make: str | None, watch_make: str | None) -> bool:
     return a == b
 
 
+def extract_trim(cfg: Config, *parts: str | None) -> str | None:
+    """The trim named in some free text, or None if none is.
+
+    Japanese exporters put the trim in the model string when they mention it
+    at all (`Cayenne S`), and leave it out entirely more often than not; Swiss
+    listings put it in a variant field. So both sides are read as free text
+    rather than from a designated column.
+
+    Matched longest-first as whole tokens, so `Turbo S` wins over `Turbo` and
+    a `GLS` is never read as an `S`.
+    """
+    haystack = normalise(" ".join(p for p in parts if p))
+    if not haystack:
+        return None
+    for trim in sorted(cfg.matching.trims, key=len, reverse=True):
+        if contains_phrase(haystack, trim):
+            return normalise(trim)
+    return None
+
+
+def _trim_compatible(cfg: Config, jp: JpListing, ch: ChListing) -> bool:
+    """Reject a comp only when both sides name a trim and the trims differ.
+
+    An unnamed trim is not evidence of a base model -- most Japanese titles
+    simply do not say -- so an unknown trim keeps every comp and is surfaced
+    as a risk flag instead.
+    """
+    if not cfg.matching.match_trim:
+        return True
+    jp_trim = extract_trim(cfg, jp.model, jp.variant)
+    if jp_trim is None:
+        return True
+    ch_trim = extract_trim(cfg, ch.model, ch.variant)
+    if ch_trim is None:
+        return True
+    return jp_trim == ch_trim
+
+
 def _watch_terms(cfg: Config, key: str | None) -> tuple[WatchItem | None, set[str]]:
     item = cfg.watch_item(key) if key else None
     if not item:
@@ -224,6 +263,8 @@ def find_comps(cfg: Config, jp: JpListing, pool: list[ChListing],
         if not _year_ok(cfg, jp, ch):
             continue
         if not _mileage_ok(cfg, jp, ch):
+            continue
+        if not _trim_compatible(cfg, jp, ch):
             continue
         out.append(ch)
     return out
@@ -319,6 +360,23 @@ def risk_flags(cfg: Config, jp: JpListing, stats: CompStats) -> list[str]:
 
     if stats.comp_count < cfg.matching.min_comps_for_confidence:
         flags.append(f"Thin comp set ({stats.comp_count}) -- price estimate is weak")
+
+    # Only ~2% of Japanese listings name a trim, so flagging "trim unknown"
+    # would fire on almost every row and mean nothing. What is worth saying is
+    # when the comps themselves disagree: a wide p25-to-p75 spread means the
+    # set is mixing trims or conditions, and the median is not a price.
+    spread_limit = cfg.matching.comp_spread_warn_ratio
+    if (
+        spread_limit
+        and stats.swiss_p25
+        and stats.swiss_p75
+        and stats.swiss_p75 / stats.swiss_p25 >= spread_limit
+    ):
+        flags.append(
+            f"Comps disagree ({stats.swiss_p25:,.0f}-{stats.swiss_p75:,.0f} CHF, "
+            f"{stats.swiss_p75 / stats.swiss_p25:.2f}x) -- likely mixed trims; "
+            f"confirm which variant this car is"
+        )
 
     item = cfg.watch_item(jp.watchlist_key) if jp.watchlist_key else None
     if item:
