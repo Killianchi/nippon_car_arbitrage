@@ -51,9 +51,10 @@ jobs:
         run: python -m playwright install --with-deps chromium
 
       - name: Restore catalog
-        # Decrypts the SQLite database from the `data` branch. A wrong key
-        # fails here rather than silently starting from an empty catalog and
-        # throwing away every first_seen date and price-history point.
+        # Restores the SQLite catalog from the `data` branch. DATA_ENCRYPTION_KEY
+        # is optional: unset means the blob is plain gzip. A *wrong* key fails
+        # here rather than silently starting from an empty catalog and throwing
+        # away every first_seen date and price-history point.
         env:
           DATA_ENCRYPTION_KEY: ${{ secrets.DATA_ENCRYPTION_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

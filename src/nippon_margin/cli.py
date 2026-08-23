@@ -301,14 +301,15 @@ def doctor(
         mark = "[green]✓[/]" if os.environ.get(var) else "[yellow]○[/]"
         console.print(f"{mark} {label}")
 
-    key = os.environ.get("DATA_ENCRYPTION_KEY", "")
+    key = os.environ.get("DATA_ENCRYPTION_KEY", "").strip()
     if not key:
-        console.print("[yellow]○[/] DATA_ENCRYPTION_KEY unset "
-                      "(fine locally; required for `sync` and in CI)")
+        console.print("[green]✓[/] catalog stored unencrypted (plain gzip) — "
+                      "set DATA_ENCRYPTION_KEY to encrypt it")
     elif len(key) < 16:
-        console.print("[red]✗[/] DATA_ENCRYPTION_KEY is too short (use 32 random chars)")
+        console.print("[red]✗[/] DATA_ENCRYPTION_KEY is too short (use 32 random "
+                      "chars, or unset it to store the catalog unencrypted)")
     else:
-        console.print("[green]✓[/] DATA_ENCRYPTION_KEY looks sane")
+        console.print("[green]✓[/] catalog will be encrypted (AES-256-GCM)")
 
     try:
         store = open_store(cfg, db_path=db)

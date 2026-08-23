@@ -77,24 +77,37 @@ prompt_secret() {   # name, human description, is_sensitive
 
 # ---------------------------------------------------------------------------
 bold ""
-bold "1. Catalog encryption key"
+bold "1. Catalog encryption (optional)"
 if secret_exists DATA_ENCRYPTION_KEY; then
-  ok "DATA_ENCRYPTION_KEY already set"
+  ok "DATA_ENCRYPTION_KEY already set — the catalog will be encrypted"
   warn "Not regenerating it: a new key makes the stored catalog unreadable."
 else
-  # Generated here rather than handed to you over a chat or an email, so the
-  # only copies are this terminal and the GitHub secret store.
-  KEY="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
-  set_secret DATA_ENCRYPTION_KEY "$KEY"
+  echo "  The catalog is committed to this repository. By default it is stored"
+  echo "  as plain gzip: no secret to manage, and you can read it with"
+  echo "  'gunzip' and 'sqlite3'. Encrypting it buys privacy and nothing else"
+  echo "  here — git already checksums the blob."
   echo
-  bold "  Save this somewhere safe — it is shown once:"
-  echo "    $KEY"
-  echo
-  echo "  Losing it does not break the scraper, but the stored catalog becomes"
-  echo "  unreadable: every first_seen date and price-history point is gone."
-  echo "  You also need it locally for: nippon-margin sync pull"
-  echo
-  read -rp "  Press enter once you have saved it. " _
+  echo "  Encrypt it? Say yes if the repository is public and you would rather"
+  echo "  your margins and deal flow were not readable by anyone who clones it."
+  read -rp "  Encrypt the catalog? [y/N] " ENCRYPT
+  if [[ "${ENCRYPT:-}" =~ ^[Yy] ]]; then
+    # Generated here rather than handed to you over a chat or an email, so the
+    # only copies are this terminal and the GitHub secret store.
+    KEY="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
+    set_secret DATA_ENCRYPTION_KEY "$KEY"
+    echo
+    bold "  Save this somewhere safe — it is shown once:"
+    echo "    $KEY"
+    echo
+    echo "  Losing it does not break the scraper, but the stored catalog becomes"
+    echo "  unreadable: every first_seen date and price-history point is gone."
+    echo "  You also need it locally for: nippon-margin sync pull"
+    echo
+    read -rp "  Press enter once you have saved it. " _
+  else
+    ok "catalog will be stored unencrypted — you can turn this on later by"
+    ok "  setting DATA_ENCRYPTION_KEY; the next push upgrades automatically"
+  fi
 fi
 
 # ---------------------------------------------------------------------------
