@@ -7,19 +7,17 @@ password come from `SMTP_USERNAME` / `SMTP_PASSWORD` in the environment.
 from __future__ import annotations
 
 import logging
-import os
 import smtplib
 from email.message import EmailMessage
 
 from ..config import EmailConfig
+from . import env_id, env_secret
 
 log = logging.getLogger(__name__)
 
 
 def configured(cfg: EmailConfig) -> bool:
-    return bool(
-        cfg.smtp_host and cfg.from_addr and cfg.to_addr and os.environ.get("SMTP_PASSWORD")
-    )
+    return bool(cfg.smtp_host and cfg.from_addr and cfg.to_addr and env_secret("SMTP_PASSWORD"))
 
 
 def send(cfg: EmailConfig, *, subject: str, body: str, html_body: str | None = None) -> bool:
@@ -38,8 +36,8 @@ def send(cfg: EmailConfig, *, subject: str, body: str, html_body: str | None = N
     try:
         with smtplib.SMTP(cfg.smtp_host, cfg.smtp_port, timeout=30) as server:
             server.starttls()
-            server.login(os.environ.get("SMTP_USERNAME") or cfg.from_addr,
-                         os.environ["SMTP_PASSWORD"])
+            server.login(env_id("SMTP_USERNAME") or cfg.from_addr,
+                         env_secret("SMTP_PASSWORD"))
             server.send_message(message)
         return True
     except Exception as exc:  # noqa: BLE001

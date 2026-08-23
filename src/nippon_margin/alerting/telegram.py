@@ -8,9 +8,10 @@ are never read from config.yaml, so a config commit can never leak a token.
 from __future__ import annotations
 
 import logging
-import os
 
 import httpx
+
+from . import env_id
 
 log = logging.getLogger(__name__)
 
@@ -20,12 +21,12 @@ MAX_LEN = 4000
 
 
 def configured() -> bool:
-    return bool(os.environ.get("TELEGRAM_BOT_TOKEN") and os.environ.get("TELEGRAM_CHAT_ID"))
+    return bool(env_id("TELEGRAM_BOT_TOKEN") and env_id("TELEGRAM_CHAT_ID"))
 
 
 def send(text: str, *, disable_preview: bool = True) -> bool:
-    token = os.environ.get("TELEGRAM_BOT_TOKEN")
-    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    token = env_id("TELEGRAM_BOT_TOKEN")
+    chat_id = env_id("TELEGRAM_CHAT_ID")
     if not (token and chat_id):
         log.warning("Telegram not configured (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID unset)")
         return False
