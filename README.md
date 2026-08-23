@@ -115,63 +115,26 @@ one adapter, even if disabled in config), `--db PATH`, `--verbose`.
 
 ---
 
-## What you have to do by hand
-
-Three things need a human. Everything else is committed.
-
-### 1. Generate the catalog encryption key
-
-The catalog is committed to this **public** repository, so it is encrypted.
-Generate a key and keep a copy somewhere safe — lose it and you lose the
-catalog history (the scraper will rebuild from scratch, but every `first_seen`
-date and price-history point is gone):
+## Setup
 
 ```bash
-python -c 'import secrets; print(secrets.token_urlsafe(32))'
+gh auth login          # if you have not already
+wrangler login         # npm install -g wrangler
+./scripts/setup.sh
 ```
 
-### 2. Add the GitHub secrets
+That script does everything that can be done from a terminal: it generates
+the catalog encryption key and stores it as a GitHub secret, prompts for the
+Telegram bot token and looks the chat id up for you, creates the Cloudflare
+Pages project, and configures the Cloudflare Access policy that keeps the
+dashboard private. Re-running it is safe — it never overwrites an existing
+secret, and never regenerates the encryption key.
 
-**Settings → Secrets and variables → Actions → New repository secret.**
-
-| name | value |
-|---|---|
-| `DATA_ENCRYPTION_KEY` | the key you just generated |
-| `TELEGRAM_BOT_TOKEN` | from [@BotFather](https://t.me/BotFather) → `/newbot` |
-| `TELEGRAM_CHAT_ID` | message your bot, then open `https://api.telegram.org/bot<TOKEN>/getUpdates` and read `result[0].message.chat.id` |
-| `CLOUDFLARE_API_TOKEN` | Cloudflare dashboard → My Profile → API Tokens → Create Token → **Cloudflare Pages: Edit** |
-| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare dashboard → Workers & Pages → the ID in the right-hand sidebar (or in the URL) |
-| `SMTP_USERNAME`, `SMTP_PASSWORD` | only if you enable email alerts |
-
-`GITHUB_TOKEN` is provided automatically; the workflow uses it to push the
-encrypted catalog, which is why `daily.yml` declares `contents: write`.
-
-### 3. Create the Cloudflare Pages project and lock it down
+Then:
 
 ```bash
-npm install -g wrangler
-wrangler login
-wrangler pages project create nippon-margin --production-branch=main
+gh workflow run daily.yml
 ```
-
-Then, and this is the part that matters — **Cloudflare dashboard → Zero Trust
-→ Access → Applications → Add an application → Self-hosted**:
-
-- **Application domain**: `nippon-margin.pages.dev` (or your custom domain)
-- **Policy**: Action *Allow*, Include → *Emails* → your address only
-- Leave the default *Block* for everything else
-
-Without this the dashboard is a public URL with your entire deal flow on it.
-The Pages project itself has no access control; Cloudflare Access is what
-provides it. Both are free.
-
-Sign-in is a one-time email code per device, which on a phone is a single tap
-from the daily Telegram message.
-
-### 4. Trigger the first run
-
-**Actions → daily → Run workflow.** It takes ~4 minutes. Optional inputs let
-you run a single adapter or do a dry run first.
 
 Verify it worked three ways: the `data` branch now holds `nippon.db.enc`, the
 Telegram digest arrives, and `https://nippon-margin.pages.dev` shows the
@@ -182,6 +145,54 @@ To pull the catalog down to your laptop afterwards:
 ```bash
 DATA_ENCRYPTION_KEY=... nippon-margin sync pull
 ```
+
+### If you would rather do it by hand
+
+<details>
+<summary>The same steps, manually</summary>
+
+**1. Generate the catalog encryption key.** The catalog is committed to this
+**public** repository, so it is encrypted. Keep a copy somewhere safe — losing
+it does not break the scraper, but the stored catalog becomes unreadable and
+every `first_seen` date and price-history point goes with it.
+
+```bash
+python -c 'import secrets; print(secrets.token_urlsafe(32))'
+```
+
+**2. Add the GitHub secrets.** Settings → Secrets and variables → Actions.
+
+| name | value |
+|---|---|
+| `DATA_ENCRYPTION_KEY` | the key you just generated |
+| `TELEGRAM_BOT_TOKEN` | from [@BotFather](https://t.me/BotFather) → `/newbot` |
+| `TELEGRAM_CHAT_ID` | message your bot, then open `https://api.telegram.org/bot<TOKEN>/getUpdates` and read `result[0].message.chat.id` |
+| `CLOUDFLARE_API_TOKEN` | My Profile → API Tokens → Create Token → **Cloudflare Pages: Edit** |
+| `CLOUDFLARE_ACCOUNT_ID` | Workers & Pages → the ID in the sidebar |
+| `SMTP_USERNAME`, `SMTP_PASSWORD` | only if you enable email alerts |
+
+`GITHUB_TOKEN` is provided automatically; the workflow uses it to push the
+encrypted catalog, which is why `daily.yml` declares `contents: write`.
+
+**3. Create the Pages project and lock it down.**
+
+```bash
+wrangler pages project create nippon-margin --production-branch=main
+```
+
+Then **Cloudflare dashboard → Zero Trust → Access → Applications → Add an
+application → Self-hosted**:
+
+- **Application domain**: `nippon-margin.pages.dev` (or your custom domain)
+- **Policy**: Action *Allow*, Include → *Emails* → your address only
+- Leave the default *Block* for everything else
+
+This part is not optional. The Pages project has no access control of its own;
+without the Access policy the dashboard is a public URL with your entire deal
+flow on it. Sign-in is a one-time email code per device, which on a phone is a
+single tap from the daily Telegram message. Both are free.
+
+</details>
 
 ## Configuration
 
@@ -400,6 +411,7 @@ authenticate", which a mock would never catch.
 
 ```
 config.yaml                  every business parameter
+scripts/setup.sh             one-shot secrets + Cloudflare setup
 src/nippon_margin/
   costs.py                   landed cost engine
   matching.py                comps, scoring, dedupe
