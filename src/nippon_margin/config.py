@@ -105,6 +105,11 @@ class ScoringConfig(Base):
 class RiskConfig(Base):
     min_auction_grade: float = 4.0
     penalise_rhd: bool = True
+    #: Drop right-hand-drive listings outright rather than merely flagging
+    #: them. A Swiss buyer discounts RHD far harder than a 0.92 score haircut
+    #: implies. Listings whose steering is simply *unstated* are kept and
+    #: flagged -- most sources omit the field on pages that are LHD anyway.
+    exclude_rhd: bool = True
     flag_penalty: float = 0.92
 
 

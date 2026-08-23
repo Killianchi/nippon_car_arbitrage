@@ -104,6 +104,10 @@ scoring:
 risk:
   min_auction_grade: 4.0
   penalise_rhd: true
+  # Drop right-hand-drive stock outright rather than just flagging it: a Swiss
+  # buyer discounts RHD far harder than a score haircut implies. Listings whose
+  # steering is merely *unstated* are kept and flagged instead.
+  exclude_rhd: true
   # Multiplicative score haircut per risk flag raised (compounding).
   flag_penalty: 0.92
 

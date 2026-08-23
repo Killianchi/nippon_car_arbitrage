@@ -16,7 +16,7 @@ import logging
 import re
 from collections.abc import Iterable
 
-from ...models import JpListing, PriceTerms
+from ...models import JpListing, PriceTerms, Steering
 from ...parse import (
     parse_engine_cc,
     parse_mileage,
@@ -29,6 +29,12 @@ from ...parse import (
 from ..base import JpAdapter
 
 log = logging.getLogger(__name__)
+
+#: BE FORWARD's own filter links spell it exactly this way -- `steering=LHD`
+#: and `steering=1` both 404. It is the one JP source that does not filter to
+#: left-hand drive by default, so without this the catalog silently takes in
+#: RHD stock that is legal to import but hard to resell in Switzerland.
+STEERING_FILTER = "steering=Left"
 
 _DETAIL = re.compile(r"^/[a-z0-9\-]+/[a-z0-9\-]+/([a-z0-9]+)/id/(\d+)/?$", re.I)
 _MAKE_LINK = re.compile(r'href="/stocklist/make=(\d+)/sortkey=n"[^>]*>\s*([A-Z][A-Z\- ]{1,24})')
@@ -61,13 +67,16 @@ class BeForwardAdapter(JpAdapter):
         }
         if not ids:
             # Make ids unavailable (first run, or the index changed shape):
-            # fall back to the unfiltered list rather than scraping nothing.
-            yield f"{self.base_url}/stocklist/"
+            # fall back to the make-less list rather than scraping nothing.
+            yield f"{self.base_url}/stocklist/{STEERING_FILTER}/sortkey=n/"
             return
         for make_id in sorted(ids):
             for page in range(1, self.source_cfg.max_pages + 1):
                 suffix = "" if page == 1 else f"page={page}/"
-                yield f"{self.base_url}/stocklist/make={make_id}/sortkey=n/{suffix}"
+                yield (
+                    f"{self.base_url}/stocklist/make={make_id}"
+                    f"/{STEERING_FILTER}/sortkey=n/{suffix}"
+                )
 
     def parse_page(self, html: str, url: str) -> list[JpListing]:
         out: list[JpListing] = []
@@ -124,6 +133,8 @@ class BeForwardAdapter(JpAdapter):
             engine_cc=parse_engine_cc(specs.get("engine")),
             price_usd=price,
             price_terms=PriceTerms.FOB,
+            # The stock list is filtered to left-hand drive by the URL above.
+            steering=Steering.LHD,
             chassis_no=stock_code,
             description=f"{title} | ref {stock_code} | "
                         + " ".join(f"{k}: {v}" for k, v in specs.items()),

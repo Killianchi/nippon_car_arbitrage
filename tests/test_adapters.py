@@ -160,3 +160,32 @@ class TestAutoUncle:
 
     def test_urls_are_absolute(self, listings):
         assert all(x.url.startswith("https://www.autouncle.ch/") for x in listings)
+
+
+class TestBeForwardSteering:
+    """BE FORWARD is the one Japanese source that does not default to LHD."""
+
+    def test_every_search_url_carries_the_lhd_filter(self, cfg):
+        from nippon_margin.adapters.jp.beforward import STEERING_FILTER, BeForwardAdapter
+
+        ad = BeForwardAdapter(cfg, SourceConfig(enabled=True, max_pages=2), fetcher=None)
+        ad._make_ids = {"MERCEDES-BENZ": "106", "PORSCHE": "42"}
+        urls = list(ad.search_urls())
+        assert urls
+        assert all(STEERING_FILTER in u for u in urls), urls
+
+    def test_the_fallback_url_is_filtered_too(self, cfg):
+        """With no make ids resolved we still must not scrape RHD stock."""
+        from nippon_margin.adapters.jp.beforward import STEERING_FILTER, BeForwardAdapter
+
+        ad = BeForwardAdapter(cfg, SourceConfig(enabled=True, max_pages=1), fetcher=None)
+        ad._make_ids = {}
+        urls = list(ad.search_urls())
+        assert len(urls) == 1
+        assert STEERING_FILTER in urls[0]
+
+    def test_the_exact_spelling_is_pinned(self):
+        """`steering=LHD` and `steering=1` both 404 on beforward.jp."""
+        from nippon_margin.adapters.jp.beforward import STEERING_FILTER
+
+        assert STEERING_FILTER == "steering=Left"

@@ -247,3 +247,40 @@ class TestTrendWindowAnchoring:
             ModelStats(day="also-bad", watchlist_key="porsche_911", spread_chf=9_000),
         ])
         assert spread_moves(store, days=7) == {}
+
+
+class TestSteering:
+    """Switzerland: RHD is legal to import and homologate, but resale is poor.
+
+    A 0.92 score haircut understates that, so explicitly right-hand-drive
+    stock is dropped before it ever reaches the catalog. Stock whose steering
+    is merely *unstated* is kept and flagged -- most sources omit the field on
+    pages that are left-hand drive anyway.
+    """
+
+    def test_rhd_listings_never_reach_the_catalog(self, cfg, store):
+        from nippon_margin.models import Steering
+
+        listings = [
+            jp("lhd", steering=Steering.LHD),
+            jp("rhd", steering=Steering.RHD),
+            jp("unknown", steering=Steering.UNKNOWN),
+        ]
+        kept = [lst for lst in listings if lst.steering is not Steering.RHD] \
+            if cfg.risk.exclude_rhd else listings
+        refs = {lst.source_ref for lst in kept}
+        assert "rhd" not in refs
+        assert {"lhd", "unknown"} <= refs
+
+    def test_unstated_steering_is_flagged_rather_than_dropped(self, cfg):
+        from nippon_margin.matching import risk_flags
+        from nippon_margin.models import CompStats, Steering
+
+        flags = risk_flags(cfg, jp(steering=Steering.UNKNOWN), CompStats(comp_count=10))
+        assert any("Steering side" in f for f in flags)
+
+    def test_the_exclusion_can_be_turned_off(self, cfg):
+        off = cfg.model_copy(deep=True)
+        off.risk.exclude_rhd = False
+        assert off.risk.exclude_rhd is False
+        assert cfg.risk.exclude_rhd is True
