@@ -20,34 +20,58 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - name: Check deploy credentials
+        id: cf
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          # `secrets` is not available in a job-level `if`, so gate on an
+          # output instead. Before setup.sh has been run there is nowhere to
+          # deploy to, and that should read as "skipped", not "broken".
+          if [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Cloudflare credentials not set -- skipping the dashboard deploy. Run ./scripts/setup.sh to configure them."
+          fi
+
       - uses: actions/checkout@v4
+        if: ${{ steps.cf.outputs.ready == 'true' }}
 
       - uses: actions/setup-python@v5
+        if: ${{ steps.cf.outputs.ready == 'true' }}
         with:
           python-version: "3.12"
           cache: pip
 
       - name: Install
+        if: ${{ steps.cf.outputs.ready == 'true' }}
         run: |
           python -m pip install --upgrade pip
           pip install -e .
 
       - name: Restore catalog and re-export
+        if: ${{ steps.cf.outputs.ready == 'true' }}
         # Without this the deployed bundle would ship no data at all.
         env:
           DATA_ENCRYPTION_KEY: ${{ secrets.DATA_ENCRYPTION_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          nippon-margin sync pull
-          nippon-margin export --out dashboard/public/data.json
+          # An empty `data` branch is fine here: the bundle just ships without
+          # a snapshot until the next daily run writes one.
+          nippon-margin sync pull || echo "no stored catalog yet"
+          nippon-margin export --out dashboard/public/data.json || echo "nothing to export yet"
 
       - uses: actions/setup-node@v4
+        if: ${{ steps.cf.outputs.ready == 'true' }}
         with:
           node-version: "20"
           cache: npm
           cache-dependency-path: dashboard/package-lock.json
 
       - name: Build
+        if: ${{ steps.cf.outputs.ready == 'true' }}
         working-directory: dashboard
         env:
           VITE_REPO_SLUG: ${{ github.repository }}
@@ -56,6 +80,7 @@ jobs:
           npm run build
 
       - name: Deploy to Cloudflare Pages
+        if: ${{ steps.cf.outputs.ready == 'true' }}
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}

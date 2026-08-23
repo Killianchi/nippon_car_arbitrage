@@ -122,8 +122,25 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: nippon-margin sync push -m "Catalog ${{ github.run_id }}"
 
+      - name: Check deploy credentials
+        id: cf
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          # `secrets` is not available in a job-level `if`, so gate on an
+          # output instead. Missing Cloudflare credentials should skip the
+          # deploy with a clear message, not fail a run whose scraping and
+          # alerting worked perfectly well.
+          if [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Cloudflare credentials not set -- skipping the dashboard deploy. Run ./scripts/setup.sh to configure them."
+          fi
+
       - name: Set up Node
-        if: ${{ !inputs.dry_run }}
+        if: ${{ !inputs.dry_run && steps.cf.outputs.ready == 'true' }}
         uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -131,7 +148,7 @@ jobs:
           cache-dependency-path: dashboard/package-lock.json
 
       - name: Bundle dashboard
-        if: ${{ !inputs.dry_run }}
+        if: ${{ !inputs.dry_run && steps.cf.outputs.ready == 'true' }}
         working-directory: dashboard
         env:
           VITE_REPO_SLUG: ${{ github.repository }}
@@ -140,7 +157,7 @@ jobs:
           npm run build
 
       - name: Deploy to Cloudflare Pages
-        if: ${{ !inputs.dry_run }}
+        if: ${{ !inputs.dry_run && steps.cf.outputs.ready == 'true' }}
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
