@@ -198,3 +198,60 @@ class TestBeForwardSteering:
         from nippon_margin.adapters.jp.beforward import STEERING_FILTER
 
         assert STEERING_FILTER == "steering=Left"
+
+
+class TestSbtPriceTerms:
+    """SBT names no incoterm. Its "Total Price" sits a flat ~USD 1,800 above
+    the vehicle price whether the car is $25k or $336k -- a shipping charge to
+    their own default market, not C&F to Europe. Treating it as C&F skipped
+    our freight entirely and understated landed cost by ~CHF 2,000 a car."""
+
+    def test_the_vehicle_price_is_used_as_fob(self, cfg):
+        from selectolax.parser import HTMLParser
+
+        from nippon_margin.adapters.jp.sbtjapan import SbtJapanAdapter
+        from nippon_margin.models import PriceTerms
+
+        html = """
+        <div class="card-product">
+          <a class="card-product__wrap" href="/used-cars/AB1234"></a>
+          <h2 class="card-product__product">2015/3 PORSCHE 911 CARRERA</h2>
+          <div class="card-product__vehicle-price">Vehicle Price USD 25,340</div>
+          <div class="card-product__total-price">Total Price USD 27,053</div>
+        </div>"""
+        ad = SbtJapanAdapter(cfg, SourceConfig(enabled=True, max_pages=1), fetcher=None)
+        listing = ad._parse_card(HTMLParser(html).css_first(".card-product"))
+        assert listing.price_usd == 25_340
+        assert listing.price_terms is PriceTerms.FOB
+
+    def test_the_published_total_is_kept_for_reference(self, cfg):
+        from selectolax.parser import HTMLParser
+
+        from nippon_margin.adapters.jp.sbtjapan import SbtJapanAdapter
+
+        html = """
+        <div class="card-product">
+          <a class="card-product__wrap" href="/used-cars/AB1234"></a>
+          <h2 class="card-product__product">2015/3 PORSCHE 911</h2>
+          <div class="card-product__vehicle-price">Vehicle Price USD 25,340</div>
+          <div class="card-product__total-price">Total Price USD 27,053</div>
+        </div>"""
+        ad = SbtJapanAdapter(cfg, SourceConfig(enabled=True, max_pages=1), fetcher=None)
+        listing = ad._parse_card(HTMLParser(html).css_first(".card-product"))
+        assert "SBT total price $27,053" in listing.description
+
+    def test_an_ask_total_does_not_break_the_price(self, cfg):
+        from selectolax.parser import HTMLParser
+
+        from nippon_margin.adapters.jp.sbtjapan import SbtJapanAdapter
+
+        html = """
+        <div class="card-product">
+          <a class="card-product__wrap" href="/used-cars/AB1234"></a>
+          <h2 class="card-product__product">2015/3 PORSCHE 911</h2>
+          <div class="card-product__vehicle-price">Vehicle Price USD 25,340</div>
+          <div class="card-product__total-price">Total Price Ask</div>
+        </div>"""
+        ad = SbtJapanAdapter(cfg, SourceConfig(enabled=True, max_pages=1), fetcher=None)
+        listing = ad._parse_card(HTMLParser(html).css_first(".card-product"))
+        assert listing.price_usd == 25_340
