@@ -2,17 +2,15 @@
 #
 # One-shot setup for nippon-margin.
 #
-# Does everything that can be done from a terminal: generates the catalog
-# encryption key, sets every GitHub Actions secret, creates the Cloudflare
-# Pages project, and locks it behind a Cloudflare Access policy for your
-# email only.
+# Does everything that can be done from a terminal: sets the Telegram secrets
+# (looking your chat id up for you) and, if you want it, generates and stores
+# a catalog encryption key.
 #
-# Needs two CLIs you are already signed in to:
+# Needs one CLI you are already signed in to:
 #   gh        https://cli.github.com          (gh auth login)
-#   wrangler  npm install -g wrangler         (wrangler login)
 #
-# Re-running is safe: existing secrets are only replaced if you say so, and
-# the Pages project and Access policy are created only if missing.
+# Re-running is safe: no existing secret is ever overwritten, and the catalog
+# encryption key is never regenerated.
 #
 # Usage:  ./scripts/setup.sh [--repo owner/name] [--project nippon-margin]
 
@@ -143,74 +141,14 @@ fi
 
 # ---------------------------------------------------------------------------
 bold ""
-bold "3. Cloudflare Pages"
-if ! command -v wrangler >/dev/null 2>&1; then
-  warn "wrangler not installed — skipping. Install with: npm install -g wrangler"
-else
-  if wrangler pages project list 2>/dev/null | grep -q "\b${PROJECT}\b"; then
-    ok "Pages project '$PROJECT' already exists"
-  else
-    wrangler pages project create "$PROJECT" --production-branch=main >/dev/null \
-      && ok "created Pages project '$PROJECT'" \
-      || warn "could not create the Pages project — create it in the dashboard"
-  fi
-fi
-
-prompt_secret CLOUDFLARE_API_TOKEN \
-  "Cloudflare API token (My Profile → API Tokens → Create → 'Cloudflare Pages: Edit'.
-    Add the 'Access: Apps and Policies: Edit' permission too if you want this
-    script to configure the Access policy for you). Input is hidden:"
-prompt_secret CLOUDFLARE_ACCOUNT_ID \
-  "Cloudflare account id (Workers & Pages → the ID in the sidebar):"
-
-# ---------------------------------------------------------------------------
-bold ""
-bold "4. Cloudflare Access (this is what keeps the dashboard private)"
-echo "  Without a policy, '${PROJECT}.pages.dev' is a public URL with your"
-echo "  entire deal flow on it. Configure it now?"
-read -rp "  Cloudflare API token with Access:Edit (blank to do it in the dashboard): " -s CF_TOKEN; echo
-read -rp "  Cloudflare account id (blank to skip): " CF_ACCOUNT
-read -rp "  Your email address (the only one allowed in): " CF_EMAIL
-
-if [[ -n "$CF_TOKEN" && -n "$CF_ACCOUNT" && -n "$CF_EMAIL" ]]; then
-  API="https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT}/access/apps"
-  APP_ID="$(curl -sS -H "Authorization: Bearer $CF_TOKEN" "$API" \
-    | python3 -c "import json,sys
-try:
-    apps = json.load(sys.stdin).get('result') or []
-    print(next((a['id'] for a in apps if '${PROJECT}' in (a.get('domain') or '')), ''))
-except Exception:
-    print('')")"
-
-  if [[ -z "$APP_ID" ]]; then
-    APP_ID="$(curl -sS -X POST "$API" \
-      -H "Authorization: Bearer $CF_TOKEN" -H "Content-Type: application/json" \
-      -d "{\"name\":\"nippon-margin dashboard\",
-           \"domain\":\"${PROJECT}.pages.dev\",
-           \"type\":\"self_hosted\",
-           \"session_duration\":\"720h\"}" \
-      | python3 -c "import json,sys
-try:
-    print((json.load(sys.stdin).get('result') or {}).get('id',''))
-except Exception:
-    print('')")"
-    [[ -n "$APP_ID" ]] && ok "created Access application" || warn "could not create the Access application"
-  else
-    ok "Access application already exists"
-  fi
-
-  if [[ -n "$APP_ID" ]]; then
-    curl -sS -X POST "${API}/${APP_ID}/policies" \
-      -H "Authorization: Bearer $CF_TOKEN" -H "Content-Type: application/json" \
-      -d "{\"name\":\"owner only\",\"decision\":\"allow\",\"precedence\":1,
-           \"include\":[{\"email\":{\"email\":\"${CF_EMAIL}\"}}]}" >/dev/null \
-      && ok "Access policy allows ${CF_EMAIL} only" \
-      || warn "could not create the Access policy — add it in the dashboard"
-  fi
-else
-  warn "Skipped. Zero Trust → Access → Applications → Add → Self-hosted:"
-  warn "  domain ${PROJECT}.pages.dev, policy Allow → Emails → your address."
-fi
+bold "3. Dashboard"
+echo "  The dashboard publishes to GitHub Pages straight from the workflow."
+echo "  Nothing to configure here: the first run turns Pages on and deploys to"
+echo "    https://$(echo "$REPO" | cut -d/ -f1 | tr 'A-Z' 'a-z').github.io/$(echo "$REPO" | cut -d/ -f2)/"
+echo
+warn "That URL is public. The page carries a noindex header so it stays out of"
+warn "search results, but anyone who knows the address can read your"
+warn "opportunities and margins. Move it behind a gate before that matters."
 
 # ---------------------------------------------------------------------------
 bold ""
@@ -218,4 +156,3 @@ bold "Done. Current secrets:"
 gh secret list --repo "$REPO" | sed 's/^/  /'
 bold ""
 echo "Next:  gh workflow run daily.yml --repo $REPO"
-echo "       (the workflow must be on the default branch first)"

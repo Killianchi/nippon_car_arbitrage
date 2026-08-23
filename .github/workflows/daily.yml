@@ -23,7 +23,9 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write   # push the encrypted catalog to the `data` branch
+  contents: write   # push the catalog to the `data` branch
+  pages: write      # publish the dashboard
+  id-token: write   # required by actions/deploy-pages
 
 jobs:
   run:
@@ -123,25 +125,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: nippon-margin sync push -m "Catalog ${{ github.run_id }}"
 
-      - name: Check deploy credentials
-        id: cf
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          # `secrets` is not available in a job-level `if`, so gate on an
-          # output instead. Missing Cloudflare credentials should skip the
-          # deploy with a clear message, not fail a run whose scraping and
-          # alerting worked perfectly well.
-          if [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CLOUDFLARE_ACCOUNT_ID" ]; then
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Cloudflare credentials not set -- skipping the dashboard deploy. Run ./scripts/setup.sh to configure them."
-          fi
-
       - name: Set up Node
-        if: ${{ !inputs.dry_run && steps.cf.outputs.ready == 'true' }}
+        if: ${{ !inputs.dry_run }}
         uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -149,21 +134,24 @@ jobs:
           cache-dependency-path: dashboard/package-lock.json
 
       - name: Bundle dashboard
-        if: ${{ !inputs.dry_run && steps.cf.outputs.ready == 'true' }}
+        if: ${{ !inputs.dry_run }}
         working-directory: dashboard
         env:
           VITE_REPO_SLUG: ${{ github.repository }}
+          VITE_BASE: /${{ github.event.repository.name }}/
         run: |
           npm ci
           npm run build
 
-      - name: Deploy to Cloudflare Pages
-        if: ${{ !inputs.dry_run && steps.cf.outputs.ready == 'true' }}
-        uses: cloudflare/wrangler-action@v3
+      - uses: actions/configure-pages@v5
+        if: ${{ !inputs.dry_run }}
         with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy dashboard/dist --project-name=nippon-margin --branch=main
+          enablement: true
+
+      - uses: actions/upload-pages-artifact@v3
+        if: ${{ !inputs.dry_run }}
+        with:
+          path: dashboard/dist
 
       - name: Save HTML cache
         if: always()
@@ -191,3 +179,19 @@ jobs:
             evidence/
           retention-days: 30
           if-no-files-found: ignore
+
+  publish:
+    needs: run
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # A failed publish must not mark a run red whose scraping, analysis and
+    # alerting all succeeded -- the data is safely on the `data` branch either
+    # way, and the digest has already gone out.
+    continue-on-error: true
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
