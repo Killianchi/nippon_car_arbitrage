@@ -89,6 +89,23 @@ async def scrape(cfg: Config, store: Store, *, only: str | None = None,
         for listing in listings:
             (jp if isinstance(listing, JpListing) else ch).append(listing)
 
+    if cfg.risk.allowed_origins:
+        before = len(jp)
+        seen_origins: dict[str, int] = {}
+        for lst in jp:
+            seen_origins[cfg.risk.resolve_origin(lst.location) or "not stated"] = (
+                seen_origins.get(cfg.risk.resolve_origin(lst.location) or "not stated", 0) + 1
+            )
+        jp = [
+            lst for lst in jp
+            if cfg.risk.origin_allowed(cfg.risk.resolve_origin(lst.location))
+        ]
+        log.info(
+            "origin filter: kept %d/%d JP listings (allowed: %s); saw %s",
+            len(jp), before, ", ".join(cfg.risk.allowed_origins),
+            ", ".join(f"{k}={v}" for k, v in sorted(seen_origins.items(), key=lambda kv: -kv[1])),
+        )
+
     if cfg.risk.exclude_rhd:
         before = len(jp)
         jp = [lst for lst in jp if lst.steering is not Steering.RHD]

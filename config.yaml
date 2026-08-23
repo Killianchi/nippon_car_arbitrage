@@ -155,6 +155,52 @@ risk:
   # anywhere else are flagged, and lose the Japanese auction grade as a
   # condition signal.
   assumed_origin: JAPAN
+  # Buy Japanese stock only. Japanese exporters list a lot of cars that sit
+  # elsewhere -- 62% of this catalog was in Incheon -- and Korea is a
+  # different trade: different freight, different paperwork, and no auction
+  # grading, so condition is unverifiable. Empty this list to buy anywhere.
+  allowed_origins: ["JAPAN"]
+  # exportfrom.jp never prints a location and sells Japanese stock only, so
+  # dropping unknowns would discard it for nothing.
+  allow_unknown_origin: true
+  # Exporters print a city, a region or a country with no consistency, so a
+  # raw token is not a country. Anything unmapped keeps its written form and
+  # therefore fails the allow-list above -- the safe direction, since it
+  # loses stock rather than buying from somewhere unintended. The scrape log
+  # lists every origin it saw, so new ports are easy to add.
+  origin_aliases:
+    JAPAN: JAPAN
+    YOKOHAMA: JAPAN
+    OSAKA: JAPAN
+    NAGOYA: JAPAN
+    KOBE: JAPAN
+    TOKYO: JAPAN
+    KYOTO: JAPAN
+    KYUSHU: JAPAN
+    HOKKAIDO: JAPAN
+    TOYAMA: JAPAN
+    AICHI: JAPAN
+    CHIBA: JAPAN
+    KANAGAWA: JAPAN
+    SAITAMA: JAPAN
+    FUKUOKA: JAPAN
+    HIROSHIMA: JAPAN
+    SENDAI: JAPAN
+    NIIGATA: JAPAN
+    IBARAKI: JAPAN
+    HITACHINAKA: JAPAN
+    SAKAI: JAPAN
+    MOJI: JAPAN
+    SHIMIZU: JAPAN
+    KAWASAKI: JAPAN
+    YOKKAICHI: JAPAN
+    KOREA: SOUTH KOREA
+    SOUTH KOREA: SOUTH KOREA
+    INCHEON: SOUTH KOREA
+    THAILAND: THAILAND
+    UAE: UAE
+    DUBAI: UAE
+    SINGAPORE: SINGAPORE
   min_auction_grade: 4.0
   penalise_rhd: true
   # Drop right-hand-drive stock outright rather than just flagging it: a Swiss
@@ -245,6 +291,9 @@ watchlist:
     model: "911"
     aliases: ["996", "997", "991", "Carrera", "Turbo S", "GT3"]
     model_codes: ["997M9701", "997M9702", "996", "991", "997"]
+    # 996 (1998) through 991 (2019); excludes the current 992.
+    year_min: 1998
+    year_max: 2019
     body: coupe
     max_km: 120000
     min_grade: 4.0
@@ -276,6 +325,9 @@ watchlist:
     model: M3
     aliases: ["E92", "E90 M3", "E93", "S65"]
     model_codes: ["E92", "E90", "E93"]
+    # E9x only.
+    year_min: 2007
+    year_max: 2013
     body: coupe
     max_km: 130000
     min_grade: 4.0
@@ -286,6 +338,10 @@ watchlist:
     model: 850i
     aliases: ["E31", "850Ci", "8 Series", "840Ci"]
     model_codes: ["E31"]
+    # E31 only. Without this, "8 Series" also matches the 2019+ G15
+    # M850i, which is a different car at four times the price.
+    year_min: 1989
+    year_max: 1999
     body: coupe
     max_km: 200000
     min_grade: 3.5
@@ -297,6 +353,7 @@ watchlist:
     model: "695"
     aliases: ["695 Biposto", "695 Tributo", "500 Abarth", "695 Rivale"]
     model_codes: ["312"]
+    year_min: 2008
     body: hatch
     max_km: 80000
     min_grade: 4.0
@@ -306,6 +363,9 @@ watchlist:
     model: SL
     aliases: ["R129", "R230", "SL500", "SL 500", "SL55", "SL 55 AMG", "SL600"]
     model_codes: ["R129", "R230", "129", "230"]
+    # R129 and R230 only.
+    year_min: 1989
+    year_max: 2011
     body: convertible
     # AutoUncle files these under `sl-class`; `/mercedes-benz/sl` 404s.
     ch_model_slug: sl-class
@@ -317,6 +377,8 @@ watchlist:
     model: C63 AMG
     aliases: ["W204", "C 63 AMG", "C63", "Black Series"]
     model_codes: ["W204", "204077"]
+    year_min: 2008
+    year_max: 2015
     body: sedan
     max_km: 130000
     min_grade: 4.0
@@ -327,6 +389,8 @@ watchlist:
     model: GranTurismo
     aliases: ["GranSport", "Gran Turismo", "GranTurismo S", "MC Stradale"]
     model_codes: ["M145", "M138"]
+    year_min: 2007
+    year_max: 2019
     body: coupe
     max_km: 110000
     min_grade: 4.0
@@ -336,6 +400,7 @@ watchlist:
     model: Giulia Quadrifoglio
     aliases: ["Giulia QV", "Quadrifoglio", "952"]
     model_codes: ["952"]
+    year_min: 2016
     body: sedan
     max_km: 100000
     min_grade: 4.0
