@@ -122,13 +122,20 @@ class SbtJapanAdapter(JpAdapter):
         name = re.sub(r"^\s*(19|20)\d{2}\s*/\s*\d{1,2}\s*", "", title).strip()
         make, model = split_make_model(_titlecase(name))
 
+        # SBT publishes a "Total Price" alongside the vehicle price but names
+        # no incoterm anywhere on the page. Measured across 50 cards, the gap
+        # is FLAT at ~USD 1,750-1,870 whether the car costs $25k or $336k --
+        # so it is a shipping charge, not a percentage fee, and at ~CHF 1,500
+        # it is less than half a RoRo quote to Europe. It ships to their own
+        # default market, not to Antwerp.
+        #
+        # Treating it as C&F therefore added no freight at all and understated
+        # landed cost by roughly CHF 2,000 a car. The vehicle price is the one
+        # figure whose meaning is unambiguous, so it is treated as FOB and
+        # costed with our own freight, exactly like the other two sources.
         vehicle_price = _price_in(card, "card-product__vehicle-price")
         total_price = _price_in(card, "card-product__total-price")
-        # Prefer the exporter's own C&F number over our freight assumption.
-        if total_price:
-            price, terms = total_price, PriceTerms.CF
-        else:
-            price, terms = vehicle_price, PriceTerms.FOB
+        price, terms = vehicle_price, PriceTerms.FOB
 
         specs = _spec_values(card)
         location_node = card.css_first(".card-product__location-value")
@@ -151,7 +158,11 @@ class SbtJapanAdapter(JpAdapter):
             price_terms=terms,
             location=location,
             auction_grade=specs.get("grade"),
-            description=title + " | " + " ".join(specs.get("raw", [])),
+            description=(
+                title
+                + (f" | SBT total price ${total_price:,.0f}" if total_price else "")
+                + " | " + " ".join(specs.get("raw", []))
+            ),
             image_urls=_images(card),
             url=self.absolute(href),
         )
