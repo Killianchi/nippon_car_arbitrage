@@ -1,12 +1,11 @@
-"""SQLite backend -- the `--local` development mode.
+"""SQLite backend -- the only backend.
 
-Same contract as Firestore, so a full scrape/analyze/report cycle can be run
-on a laptop without spending a single Firestore read.
+The whole catalog is one file. That is what makes the git-backed state sync
+in `statesync.py` possible: a single blob to encrypt, commit and restore.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import sqlite3
 from datetime import UTC, datetime
@@ -90,11 +89,6 @@ CREATE TABLE IF NOT EXISTS runs (
 CREATE TABLE IF NOT EXISTS alerts_sent (
     key TEXT PRIMARY KEY,
     at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS live_config (
-    key TEXT PRIMARY KEY,
-    payload TEXT NOT NULL
 );
 """
 
@@ -299,16 +293,3 @@ class SqliteStore(Store):
             "INSERT OR REPLACE INTO alerts_sent (key, at) VALUES (?,?)", (key, _iso(at))
         )
         self.conn.commit()
-
-    # -- live config --------------------------------------------------------
-    def watchlist_override(self) -> list[dict] | None:
-        row = self.conn.execute(
-            "SELECT payload FROM live_config WHERE key = 'watchlist'"
-        ).fetchone()
-        if not row:
-            return None
-        try:
-            data = json.loads(row["payload"])
-        except json.JSONDecodeError:
-            return None
-        return data if isinstance(data, list) else None

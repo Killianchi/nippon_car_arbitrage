@@ -1,53 +1,51 @@
-import { useEffect, useState } from 'react'
-import { fetchWatchlist, saveWatchlist } from '../lib/data'
+import { useEffect, useMemo, useState } from 'react'
+import { fetchWatchlist } from '../lib/data'
 import { ErrorBox, Loading } from '../components/Common'
+
+const REPO = import.meta.env.VITE_REPO_SLUG || 'Killianchi/nippon_car_arbitrage'
+const EDIT_URL = `https://github.com/${REPO}/edit/main/config.yaml`
 
 const BLANK = {
   key: '', make: '', model: '', aliases: [], model_codes: [],
-  body: '', max_km: null, min_grade: null, homologation_mfk_chf: null,
+  body: '', ch_model_slug: '', max_km: null, min_grade: null,
+  homologation_mfk_chf: null, risk_notes: [],
 }
 
 const BODIES = ['', 'coupe', 'convertible', 'sedan', 'suv', 'offroad_4x4', 'hatch']
 
 /**
- * Live watchlist editor.
+ * Watchlist builder.
  *
- * This writes `config/watchlist`, the one document the Firestore rules let a
- * client touch. The next Actions run merges it over config.yaml. Cost
- * parameters deliberately stay in the repo: a git commit is a record of what
- * you believed your tax and shipping numbers were on a given day, and nothing
- * in a browser should be able to rewrite that.
+ * There is no database to write to any more, and that turns out to be the
+ * better design: the watchlist lives in `config.yaml`, so changing it is a
+ * commit, and you get a dated history of what you were hunting and why. This
+ * page does the fiddly part -- getting the YAML shape and the alias/model-code
+ * fields right -- and hands you something to paste.
  */
-export default function Watchlist({ user }) {
+export default function Watchlist() {
   const [items, setItems] = useState(null)
   const [error, setError] = useState(null)
-  const [status, setStatus] = useState(null)
-  const [busy, setBusy] = useState(false)
+  const [copied, setCopied] = useState(false)
 
-  useEffect(() => { fetchWatchlist().then(setItems).catch(setError) }, [])
+  useEffect(() => {
+    fetchWatchlist()
+      .then((rows) => setItems(rows.map((r) => ({ ...BLANK, ...r }))))
+      .catch(setError)
+  }, [])
+
+  const yaml = useMemo(() => (items ? toYaml(items) : ''), [items])
 
   const patch = (i, field, value) =>
     setItems(items.map((it, idx) => (idx === i ? { ...it, [field]: value } : it)))
 
-  const save = async () => {
-    setBusy(true); setStatus(null)
-    const cleaned = items
-      .filter((it) => it.key && it.make && it.model)
-      .map((it) => ({
-        ...it,
-        aliases: toList(it.aliases),
-        model_codes: toList(it.model_codes),
-        max_km: toNum(it.max_km),
-        min_grade: toNum(it.min_grade),
-        homologation_mfk_chf: toNum(it.homologation_mfk_chf),
-        body: it.body || null,
-      }))
+  const copy = async () => {
     try {
-      await saveWatchlist(cleaned, user?.uid)
-      setItems(cleaned)
-      setStatus('Saved. The next scheduled run picks this up.')
-    } catch (e) { setError(e) }
-    finally { setBusy(false) }
+      await navigator.clipboard.writeText(yaml)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      setCopied(false)
+    }
   }
 
   if (error) return <ErrorBox error={error} />
@@ -56,9 +54,9 @@ export default function Watchlist({ user }) {
   return (
     <div className="space-y-3">
       <div className="card p-3 text-xs text-neutral-500">
-        Overrides <code>config.yaml</code>'s watchlist on the next run. An empty
-        list here means the repo's watchlist is used as-is. Cost parameters are
-        not editable from the dashboard by design.
+        Edit here, then paste the generated YAML over the <code>watchlist:</code>
+        {' '}block in <code>config.yaml</code>. The next scheduled run picks it up.
+        Cost parameters live in the same file and are deliberately not editable here.
       </div>
 
       {items.map((item, i) => (
@@ -88,9 +86,11 @@ export default function Watchlist({ user }) {
             <Field label="min grade" value={item.min_grade ?? ''} type="number"
                    onChange={(v) => patch(i, 'min_grade', v)} placeholder="4" />
           </div>
-          <div className="flex items-end gap-2">
-            <Field label="homologation CHF override" value={item.homologation_mfk_chf ?? ''}
+          <div className="grid grid-cols-2 items-end gap-2 md:grid-cols-4">
+            <Field label="homologation CHF" value={item.homologation_mfk_chf ?? ''}
                    type="number" onChange={(v) => patch(i, 'homologation_mfk_chf', v)} />
+            <Field label="Swiss URL slug" value={item.ch_model_slug || ''}
+                   onChange={(v) => patch(i, 'ch_model_slug', v)} placeholder="sl-class" />
             <button className="btn text-neg"
                     onClick={() => setItems(items.filter((_, idx) => idx !== i))}>
               Remove
@@ -103,11 +103,17 @@ export default function Watchlist({ user }) {
         <button className="btn" onClick={() => setItems([...items, { ...BLANK }])}>
           Add model
         </button>
-        <button className="btn font-semibold" disabled={busy} onClick={save}>
-          {busy ? 'Saving…' : 'Save watchlist'}
+        <button className="btn font-semibold" onClick={copy}>
+          {copied ? 'Copied ✓' : 'Copy YAML'}
         </button>
+        <a className="btn" href={EDIT_URL} target="_blank" rel="noreferrer">
+          Edit config.yaml on GitHub
+        </a>
       </div>
-      {status && <p className="text-sm text-pos">{status}</p>}
+
+      <pre className="card overflow-x-auto p-3 text-xs leading-relaxed text-neutral-300">
+{yaml}
+      </pre>
     </div>
   )
 }
@@ -125,4 +131,39 @@ function Field({ label, value, onChange, type = 'text', placeholder }) {
 const joinList = (v) => (Array.isArray(v) ? v.join(', ') : v || '')
 const toList = (v) =>
   Array.isArray(v) ? v : String(v || '').split(',').map((s) => s.trim()).filter(Boolean)
-const toNum = (v) => (v === '' || v === null || v === undefined ? null : Number(v))
+
+/** Quote anything YAML would otherwise read as a number or a boolean. */
+function scalar(value) {
+  const s = String(value)
+  return /^[A-Za-z][\w\-. ]*$/.test(s) && !/^(y|n|yes|no|true|false|on|off|null)$/i.test(s)
+    ? s
+    : JSON.stringify(s)
+}
+
+function toYaml(items) {
+  const lines = ['watchlist:']
+  items
+    .filter((it) => it.key && it.make && it.model)
+    .forEach((it) => {
+      lines.push(`  - key: ${scalar(it.key)}`)
+      lines.push(`    make: ${scalar(it.make)}`)
+      lines.push(`    model: ${scalar(it.model)}`)
+      const aliases = toList(it.aliases)
+      if (aliases.length) lines.push(`    aliases: [${aliases.map(scalar).join(', ')}]`)
+      const codes = toList(it.model_codes)
+      if (codes.length) lines.push(`    model_codes: [${codes.map(scalar).join(', ')}]`)
+      if (it.body) lines.push(`    body: ${it.body}`)
+      if (it.ch_model_slug) lines.push(`    ch_model_slug: ${scalar(it.ch_model_slug)}`)
+      if (it.max_km) lines.push(`    max_km: ${Number(it.max_km)}`)
+      if (it.min_grade) lines.push(`    min_grade: ${Number(it.min_grade)}`)
+      if (it.homologation_mfk_chf) {
+        lines.push(`    homologation_mfk_chf: ${Number(it.homologation_mfk_chf)}`)
+      }
+      const notes = toList(it.risk_notes)
+      if (notes.length) {
+        lines.push('    risk_notes:')
+        notes.forEach((n) => lines.push(`      - ${scalar(n)}`))
+      }
+    })
+  return lines.join('\n')
+}

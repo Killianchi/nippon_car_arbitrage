@@ -1,7 +1,8 @@
-"""Storage contract shared by the SQLite and Firestore backends.
+"""Storage contract.
 
-Both backends implement the same surface so `--local` development and the
-Actions run exercise identical pipeline code.
+SQLite is the only implementation, but the contract stays written down: it is
+what the pipeline codes against, and what makes the pipeline tests readable
+without a database in the loop.
 """
 
 from __future__ import annotations
@@ -101,10 +102,5 @@ class Store(ABC):
     def mark_alert_sent(self, key: str, at: datetime) -> None:
         ...
 
-    # -- live config --------------------------------------------------------
-    def watchlist_override(self) -> list[dict] | None:
-        """Watchlist rows written by the dashboard editor, if any."""
-        return None
-
-    def close(self) -> None:  # noqa: B027 - optional teardown; Firestore needs none
-        """Release resources. SQLite closes its handle; Firestore has nothing to do."""
+    def close(self) -> None:  # noqa: B027 - optional teardown, not every store needs it
+        """Release resources."""

@@ -5,15 +5,16 @@
 # Changing the watchlist or a cost assumption = a git commit, which gives you
 # full history of what you believed the numbers were on any given day.
 #
-# The watchlist can additionally be overridden live from the dashboard
-# (Firestore doc `config/watchlist`); cost parameters are NEVER read from
-# Firestore -- they only live here.
+# The dashboard's Watchlist page generates the `watchlist:` block below for you
+# to paste; it deliberately cannot write it, so a browser can never silently
+# change a tax rate or a shipping assumption.
 # ---------------------------------------------------------------------------
 
 meta:
   timezone: Europe/Zurich
-  # Firebase project id. Set this after you pick a project (see README).
-  firebase_project_id: ""
+  # Cloudflare Pages project name, used only for the deploy step's log line.
+  # The deploy target itself lives in .github/workflows/.
+  dashboard_project: nippon-margin
 
 # --- Landed cost engine ----------------------------------------------------
 costs:
@@ -132,8 +133,8 @@ alerts:
 # Every adapter can be disabled here without touching code.
 sources:
   # Discard listings that do not resolve to a watchlist entry. Exporter
-  # make-level pages return hundreds of vans; storing them costs Firestore
-  # writes and buys nothing. Set false to build a broader catalog.
+  # make-level pages return hundreds of vans; storing them bloats the catalog
+  # and the dashboard snapshot. Set false to build a broader catalog.
   only_watchlist: true
   http:
     # Several of these sites serve a stub page (or 403) to non-browser agents,

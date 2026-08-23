@@ -2,9 +2,9 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
-import { fetchFx, fetchOpportunities } from '../lib/data'
+import { fetchFx, fetchFxMeta } from '../lib/data'
 import { Empty, ErrorBox, Loading, Stat } from '../components/Common'
-import { carName, chf, pct, signClass } from '../lib/format'
+import { chf, pct, signClass } from '../lib/format'
 
 const AXIS = { stroke: '#6b7280', fontSize: 11 }
 const TOOLTIP = {
@@ -12,34 +12,14 @@ const TOOLTIP = {
   labelStyle: { color: '#9ca3af' },
 }
 
-/**
- * What a fractional FX move is worth on one car's landed cost.
- * The tax chain amplifies it: freight and the FOB price sit inside the
- * customs value, so 4% Automobilsteuer and 8.1% VAT ride on top of the move.
- */
-function marginImpact(priceUsd, move, usdChf) {
-  return -(priceUsd * usdChf * move) * 1.04 * 1.081
-}
-
-function moveOver(rows, field, days) {
-  if (!rows || rows.length < 2) return null
-  const latest = rows[rows.length - 1]
-  const cutoff = new Date(new Date(latest.day).getTime() - days * 864e5)
-    .toISOString().slice(0, 10)
-  const earlier = rows.filter((r) => r.day <= cutoff)
-  const base = earlier.length ? earlier[earlier.length - 1] : rows[0]
-  if (!base[field]) return null
-  return (latest[field] - base[field]) / base[field]
-}
-
 export default function Fx() {
   const [rows, setRows] = useState(null)
-  const [opps, setOpps] = useState([])
+  const [meta, setMeta] = useState({ moves: {}, impacts: [] })
   const [error, setError] = useState(null)
 
   useEffect(() => {
-    Promise.all([fetchFx({ days: 180 }), fetchOpportunities({ max: 50 })])
-      .then(([f, o]) => { setRows(f); setOpps(o) })
+    Promise.all([fetchFx(), fetchFxMeta()])
+      .then(([f, m]) => { setRows(f); setMeta(m) })
       .catch(setError)
   }, [])
 
@@ -54,23 +34,12 @@ export default function Fx() {
     [rows],
   )
 
-  const usdMove7 = moveOver(rows, 'usd_chf', 7)
-  const jpyMove7 = moveOver(rows, 'jpy_chf', 7)
+  // Both the 7-day windows and the tax-chain amplification are computed by
+  // the daily run: they are business rules, not presentation.
+  const usdMove7 = meta.moves.usd_chf_7d ?? null
+  const jpyMove7 = meta.moves.jpy_chf_7d ?? null
   const latest = rows?.[rows.length - 1]
-
-  const annotations = useMemo(() => {
-    if (!latest || usdMove7 == null) return []
-    const seen = new Set()
-    return opps
-      .filter((o) => o.price_usd && o.watchlist_key && !seen.has(o.watchlist_key)
-                     && seen.add(o.watchlist_key))
-      .slice(0, 5)
-      .map((o) => ({
-        name: carName(o),
-        impact: marginImpact(o.price_usd, usdMove7, latest.usd_chf),
-        hypothetical: marginImpact(o.price_usd, -0.03, latest.usd_chf),
-      }))
-  }, [opps, latest, usdMove7])
+  const annotations = meta.impacts
 
   if (error) return <ErrorBox error={error} />
   if (!rows) return <Loading what="FX history" />
@@ -128,12 +97,12 @@ export default function Fx() {
               <div className="font-medium">{a.name}</div>
               <div className="text-neutral-400">
                 Last 7 days ({pct(usdMove7)}):{' '}
-                <span className={signClass(a.impact)}>
-                  {a.impact >= 0 ? '−' : '+'}{chf(Math.abs(a.impact))} landed cost
+                <span className={signClass(a.recent_chf)}>
+                  {a.recent_chf >= 0 ? '−' : '+'}{chf(Math.abs(a.recent_chf))} landed cost
                 </span>
               </div>
               <div className="text-neutral-500">
-                A further 3% weakening would add {chf(Math.abs(a.hypothetical))} to the spread.
+                A further 3% weakening would add {chf(Math.abs(a.per_3pct_chf))} to the spread.
               </div>
             </li>
           ))}

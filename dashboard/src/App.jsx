@@ -1,8 +1,8 @@
-import { Suspense, lazy } from 'react'
+import { Suspense, lazy, useEffect, useState } from 'react'
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
-import { SignIn, logout, useAuth } from './components/Auth'
 import Opportunities from './pages/Opportunities'
 import Runs from './pages/Runs'
+import { fetchGeneratedAt } from './lib/data'
 
 // recharts is ~150 kB gzipped -- more than everything else put together.
 // The home screen is opened from a phone every morning and draws no charts,
@@ -20,36 +20,27 @@ const TABS = [
 ]
 
 export default function App() {
-  const user = useAuth()
-
-  if (user === undefined) {
-    return <div className="p-8 text-center text-sm text-neutral-500">Checking session…</div>
-  }
-  if (!user) return <SignIn />
-
   return (
     <div className="min-h-screen pb-20">
       <header className="sticky top-0 z-20 border-b border-edge bg-ink-900/90 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
+        <div className="mx-auto flex max-w-6xl items-baseline justify-between gap-3 px-4 py-3">
           <h1 className="text-sm font-semibold tracking-tight">nippon-margin</h1>
-          <button className="text-xs text-neutral-500 hover:text-neutral-300" onClick={logout}>
-            {user.email || 'sign out'}
-          </button>
+          <Freshness />
         </div>
       </header>
 
       <main className="mx-auto max-w-6xl px-3 py-4">
         <Suspense fallback={<p className="py-10 text-center text-sm text-neutral-500">Loading…</p>}>
-        <Routes>
-          <Route path="/" element={<Navigate to="/opportunities" replace />} />
-          <Route path="/opportunities" element={<Opportunities />} />
-          <Route path="/models" element={<ModelDetail />} />
-          <Route path="/models/:key" element={<ModelDetail />} />
-          <Route path="/fx" element={<Fx />} />
-          <Route path="/watchlist" element={<Watchlist user={user} />} />
-          <Route path="/runs" element={<Runs />} />
-          <Route path="*" element={<Navigate to="/opportunities" replace />} />
-        </Routes>
+          <Routes>
+            <Route path="/" element={<Navigate to="/opportunities" replace />} />
+            <Route path="/opportunities" element={<Opportunities />} />
+            <Route path="/models" element={<ModelDetail />} />
+            <Route path="/models/:key" element={<ModelDetail />} />
+            <Route path="/fx" element={<Fx />} />
+            <Route path="/watchlist" element={<Watchlist />} />
+            <Route path="/runs" element={<Runs />} />
+            <Route path="*" element={<Navigate to="/opportunities" replace />} />
+          </Routes>
         </Suspense>
       </main>
 
@@ -73,5 +64,28 @@ export default function App() {
         </div>
       </nav>
     </div>
+  )
+}
+
+/**
+ * How old the data is. With a static snapshot this is the one thing the user
+ * cannot infer from the page, and a stale snapshot is exactly the failure
+ * mode worth surfacing -- it means the daily run stopped working.
+ */
+function Freshness() {
+  const [at, setAt] = useState(null)
+  useEffect(() => { fetchGeneratedAt().then(setAt).catch(() => setAt(null)) }, [])
+  if (!at) return null
+
+  const hours = (Date.now() - new Date(at).getTime()) / 36e5
+  const label =
+    hours < 1 ? 'just now'
+    : hours < 36 ? `${Math.round(hours)}h ago`
+    : `${Math.round(hours / 24)}d ago`
+
+  return (
+    <span className={`text-xs ${hours > 36 ? 'text-warn' : 'text-neutral-500'}`}>
+      {hours > 36 ? '⚠ ' : ''}updated {label}
+    </span>
   )
 }

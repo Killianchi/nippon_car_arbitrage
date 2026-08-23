@@ -156,7 +156,7 @@ class SourcesConfig(Base):
     http: HttpConfig = Field(default_factory=HttpConfig)
     #: Discard scraped listings that do not resolve to a watchlist entry.
     #: A make-level page on an exporter returns hundreds of vans we will never
-    #: buy; storing them costs Firestore writes and buys nothing.
+    #: buy; storing them bloats the catalog and the dashboard snapshot.
     only_watchlist: bool = True
     japan: dict[str, SourceConfig] = Field(default_factory=dict)
     switzerland: dict[str, SourceConfig] = Field(default_factory=dict)
@@ -212,7 +212,7 @@ class CatalogConfig(Base):
 
 class MetaConfig(Base):
     timezone: str = "Europe/Zurich"
-    firebase_project_id: str = ""
+    dashboard_project: str = "nippon-margin"
 
 
 class Config(Base):
@@ -263,30 +263,3 @@ def load_config(path: str | Path | None = None) -> Config:
         raise FileNotFoundError(f"config not found: {p} (run from the repo root or set NIPPON_CONFIG)")
     raw: dict[str, Any] = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
     return Config.model_validate(raw)
-
-
-def apply_watchlist_override(cfg: Config, override: list[dict[str, Any]] | None) -> Config:
-    """Merge a Firestore-hosted watchlist over the file one.
-
-    The dashboard's watchlist editor writes `config/watchlist`; cost params are
-    deliberately not overridable from the client.
-    """
-    if not override:
-        return cfg
-    merged = cfg.model_copy(deep=True)
-    by_key = {w.key: w for w in merged.watchlist}
-    for entry in override:
-        key = entry.get("key")
-        if not key:
-            continue
-        if key in by_key:
-            base = by_key[key].model_dump()
-            base.update({k: v for k, v in entry.items() if v is not None})
-            by_key[key] = WatchItem.model_validate(base)
-        else:
-            try:
-                by_key[key] = WatchItem.model_validate(entry)
-            except Exception:  # noqa: BLE001 - a bad dashboard row must not kill the run
-                continue
-    merged.watchlist = list(by_key.values())
-    return merged

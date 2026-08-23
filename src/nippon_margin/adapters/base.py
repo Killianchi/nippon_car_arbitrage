@@ -25,7 +25,7 @@ log = logging.getLogger(__name__)
 
 
 class Adapter(ABC):
-    #: stable short name; also the Firestore doc-id prefix and the `--source` value
+    #: stable short name; also the doc-id prefix and the `--source` value
     name: str = ""
     #: "jp" (buy side) or "ch" (sell side)
     side: str = "jp"

@@ -1,7 +1,9 @@
 """nippon-margin command line.
 
-Every command runs identically locally (`--local`, SQLite) and in GitHub
-Actions (Firestore), so what you debug on a laptop is what runs at 07:00.
+Every command runs identically on a laptop and in GitHub Actions against the
+same SQLite catalog, so what you debug locally is what runs at 07:00. The only
+difference in CI is that the catalog is pulled from, and pushed back to, the
+encrypted `data` branch around the run (`sync pull` / `sync push`).
 """
 
 from __future__ import annotations
@@ -17,8 +19,8 @@ from rich.logging import RichHandler
 from rich.table import Table
 
 from .adapters.registry import all_source_names
-from .config import apply_watchlist_override, load_config
-from .store import open_store
+from .config import load_config
+from .store import DEFAULT_DB_PATH, open_store
 
 app = typer.Typer(
     add_completion=False,
@@ -28,7 +30,7 @@ app = typer.Typer(
 console = Console()
 
 
-def _setup(verbose: bool, config_path: str, local: bool, db: str | None):
+def _configure_logging(verbose: bool) -> None:
     load_dotenv()
     logging.basicConfig(
         level=logging.DEBUG if verbose else logging.INFO,
@@ -37,11 +39,14 @@ def _setup(verbose: bool, config_path: str, local: bool, db: str | None):
         handlers=[RichHandler(console=console, rich_tracebacks=True, show_path=False)],
     )
     logging.getLogger("httpx").setLevel(logging.WARNING)
+
+
+def _setup(verbose: bool, config_path: str, db: str | None = None):
+    _configure_logging(verbose)
     cfg = load_config(config_path)
-    store = open_store(cfg, local=local, db_path=db)
-    # The dashboard's watchlist editor writes to the store; config.yaml stays
-    # the source of truth for cost parameters.
-    cfg = apply_watchlist_override(cfg, store.watchlist_override())
+    store = open_store(cfg, db_path=db)
+    # config.yaml is the whole truth now: the watchlist is edited by commit,
+    # which is also what gives you a history of what you were hunting when.
     return cfg, store
 
 
@@ -51,8 +56,7 @@ def scrape(
     source: str | None = typer.Option(None, "--source", "-s",
                                          help="Run one adapter only, even if disabled in config."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Parse and report, write nothing."),
-    local: bool = typer.Option(False, "--local", help="Use SQLite instead of Firestore."),
-    db: str | None = typer.Option(None, "--db", help="SQLite path (implies --local)."),
+    db: str | None = typer.Option(None, "--db", help="SQLite path (default data/nippon.db)."),
     config_path: str = typer.Option("config.yaml", "--config", "-c"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ):
@@ -62,7 +66,7 @@ def scrape(
     if source and source not in all_source_names():
         raise typer.BadParameter(f"unknown source. Known: {', '.join(all_source_names())}")
 
-    cfg, store = _setup(verbose, config_path, local or bool(db), db)
+    cfg, store = _setup(verbose, config_path, db)
     try:
         run = asyncio.run(run_scrape(cfg, store, only=source, dry_run=dry_run))
     finally:
@@ -90,7 +94,6 @@ def scrape(
 
 @app.command()
 def analyze(
-    local: bool = typer.Option(False, "--local"),
     db: str | None = typer.Option(None, "--db"),
     config_path: str = typer.Option("config.yaml", "--config", "-c"),
     top: int = typer.Option(15, "--top", help="How many rows to print."),
@@ -99,7 +102,7 @@ def analyze(
     """Price every Japanese listing against the Swiss pool and rank it."""
     from .pipeline.analyze import analyze as run_analyze
 
-    cfg, store = _setup(verbose, config_path, local or bool(db), db)
+    cfg, store = _setup(verbose, config_path, db)
     try:
         opportunities = run_analyze(cfg, store)
     finally:
@@ -137,7 +140,6 @@ def report(
     out: Path | None = typer.Option(None, "--out", "-o", help="Write the HTML digest here."),
     markdown: bool = typer.Option(False, "--markdown", help="Print Markdown to stdout."),
     top: int = typer.Option(10, "--top"),
-    local: bool = typer.Option(False, "--local"),
     db: str | None = typer.Option(None, "--db"),
     config_path: str = typer.Option("config.yaml", "--config", "-c"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
@@ -145,7 +147,7 @@ def report(
     """Render the daily digest as HTML and/or Markdown."""
     from .pipeline.report import build_digest, render_html, render_markdown
 
-    cfg, store = _setup(verbose, config_path, local or bool(db), db)
+    cfg, store = _setup(verbose, config_path, db)
     try:
         digest = build_digest(cfg, store, top_n=top)
         md = render_markdown(cfg, digest)
@@ -167,7 +169,6 @@ def alert(
     evidence: bool = typer.Option(False, "--evidence",
                                   help="Archive HTML + screenshots of alerted listings."),
     evidence_dir: Path = typer.Option(Path("evidence"), "--evidence-dir"),
-    local: bool = typer.Option(False, "--local"),
     db: str | None = typer.Option(None, "--db"),
     config_path: str = typer.Option("config.yaml", "--config", "-c"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
@@ -175,7 +176,7 @@ def alert(
     """Send Telegram/email alerts for whatever crossed a threshold."""
     from .pipeline.alert import archive_evidence, send_alerts, send_digest
 
-    cfg, store = _setup(verbose, config_path, local or bool(db), db)
+    cfg, store = _setup(verbose, config_path, db)
     try:
         count = send_alerts(cfg, store, dry_run=dry_run, weekly=weekly)
         if digest:
@@ -195,7 +196,6 @@ def alert(
 def backfill(
     fx: bool = typer.Option(True, "--fx/--no-fx", help="Backfill ECB FX history."),
     days: int = typer.Option(90, "--days"),
-    local: bool = typer.Option(False, "--local"),
     db: str | None = typer.Option(None, "--db"),
     config_path: str = typer.Option("config.yaml", "--config", "-c"),
     verbose: bool = typer.Option(False, "--verbose", "-v"),
@@ -204,7 +204,7 @@ def backfill(
     from .fx import backfill_fx
     from .http import Fetcher
 
-    cfg, store = _setup(verbose, config_path, local or bool(db), db)
+    cfg, store = _setup(verbose, config_path, db)
 
     async def _run() -> int:
         async with Fetcher(cfg.sources.http) as fetcher:
@@ -218,6 +218,60 @@ def backfill(
 
 
 @app.command()
+def export(
+    out: Path = typer.Option(Path("dashboard/public/data.json"), "--out", "-o"),
+    db: str | None = typer.Option(None, "--db"),
+    config_path: str = typer.Option("config.yaml", "--config", "-c"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+):
+    """Write the static JSON snapshot the dashboard reads."""
+    from .pipeline.export import export as run_export
+
+    cfg, store = _setup(verbose, config_path, db)
+    try:
+        path = run_export(cfg, store, out)
+    finally:
+        store.close()
+    console.print(f"[green]wrote[/] {path} ({path.stat().st_size / 1024:.0f} KB)")
+
+
+sync_app = typer.Typer(no_args_is_help=True, help="Move the catalog to and from the `data` branch.")
+app.add_typer(sync_app, name="sync")
+
+
+@sync_app.command("pull")
+def sync_pull(
+    db: str | None = typer.Option(None, "--db"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+):
+    """Restore the encrypted catalog from the `data` branch."""
+    from .statesync import pull
+
+    _configure_logging(verbose)
+    target = Path(db or DEFAULT_DB_PATH)
+    restored = pull(target)
+    if restored:
+        console.print(f"[green]restored[/] {target} ({target.stat().st_size / 1024:.0f} KB)")
+    else:
+        console.print("[yellow]no stored state[/] — starting a fresh catalog")
+
+
+@sync_app.command("push")
+def sync_push(
+    db: str | None = typer.Option(None, "--db"),
+    message: str | None = typer.Option(None, "--message", "-m"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+):
+    """Encrypt the catalog and force-push it to the `data` branch."""
+    from .statesync import push
+
+    _configure_logging(verbose)
+    target = Path(db or DEFAULT_DB_PATH)
+    push(target, message=message)
+    console.print(f"[green]pushed[/] {target} to the data branch")
+
+
+@app.command()
 def sources():
     """List every known source adapter."""
     for name in all_source_names():
@@ -226,7 +280,6 @@ def sources():
 
 @app.command()
 def doctor(
-    local: bool = typer.Option(False, "--local"),
     db: str | None = typer.Option(None, "--db"),
     config_path: str = typer.Option("config.yaml", "--config", "-c"),
 ):
@@ -248,41 +301,39 @@ def doctor(
         mark = "[green]✓[/]" if os.environ.get(var) else "[yellow]○[/]"
         console.print(f"{mark} {label}")
 
-    if local or db:
-        console.print("[green]✓[/] local mode: SQLite")
+    key = os.environ.get("DATA_ENCRYPTION_KEY", "")
+    if not key:
+        console.print("[yellow]○[/] DATA_ENCRYPTION_KEY unset "
+                      "(fine locally; required for `sync` and in CI)")
+    elif len(key) < 16:
+        console.print("[red]✗[/] DATA_ENCRYPTION_KEY is too short (use 32 random chars)")
     else:
-        has_creds = bool(
-            os.environ.get("FIREBASE_SERVICE_ACCOUNT")
-            or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-        )
-        console.print(
-            f"{'[green]✓[/]' if has_creds else '[red]✗[/]'} Firebase service-account credentials"
-        )
-        console.print(
-            f"{'[green]✓[/]' if cfg.meta.firebase_project_id else '[yellow]○[/]'} "
-            f"project id: {cfg.meta.firebase_project_id or 'unset (will fall back to the env)'}"
-        )
+        console.print("[green]✓[/] DATA_ENCRYPTION_KEY looks sane")
 
     try:
-        store = open_store(cfg, local=local or bool(db), db_path=db)
-        runs = store.recent_runs(limit=1)
-        console.print(f"[green]✓[/] store reachable; last run: "
-                      f"{runs[0].id if runs else 'none yet'}")
+        store = open_store(cfg, db_path=db)
+        runs_seen = store.recent_runs(limit=1)
+        fx = store.latest_fx()
+        console.print(f"[green]✓[/] catalog reachable; last run: "
+                      f"{runs_seen[0].id if runs_seen else 'none yet'}")
+        console.print(
+            f"{'[green]✓[/]' if fx else '[yellow]○[/]'} FX: "
+            + (f"{fx.day} USD/CHF {fx.usd_chf:.4f}" if fx else "none stored -- run `backfill`")
+        )
         store.close()
     except Exception as exc:  # noqa: BLE001 - this command exists to report exactly this
-        console.print(f"[red]✗[/] store unreachable: {exc}")
+        console.print(f"[red]✗[/] catalog unreachable: {exc}")
         raise typer.Exit(code=1) from exc
 
 
 @app.command()
 def runs(
     limit: int = typer.Option(10, "--limit", "-n"),
-    local: bool = typer.Option(False, "--local"),
     db: str | None = typer.Option(None, "--db"),
     config_path: str = typer.Option("config.yaml", "--config", "-c"),
 ):
     """Show recent run health -- per-adapter counts and errors."""
-    cfg, store = _setup(False, config_path, local or bool(db), db)
+    cfg, store = _setup(False, config_path, db)
     try:
         table = Table(title="recent runs", show_edge=False)
         for col in ("run", "ok", "JP", "CH", "sources", "errors"):

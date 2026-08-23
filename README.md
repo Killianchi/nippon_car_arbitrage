@@ -8,13 +8,22 @@ It runs itself: a GitHub Actions cron scrapes Japanese exporter stock and
 Swiss classifieds every morning, computes the true landed cost of every
 Japanese car (freight, Automobilsteuer, VAT, homologation, MFK, the lot),
 matches each one against Swiss comparables, scores the spread, and pushes the
-best few to Telegram. A Firebase-hosted dashboard is the daily read.
+best few to Telegram. A static dashboard on Cloudflare Pages is the daily read.
 
 ```
 Japanese exporters ─┐
-                    ├─► catalog (Firestore) ─► landed cost ─► comps ─► score ─┬─► Telegram
-Swiss classifieds ──┘                                                          └─► dashboard
+                    ├─► catalog ─► landed cost ─► comps ─► score ─┬─► Telegram
+Swiss classifieds ──┘     ▲                                       └─► dashboard
+                          │                                            ▲
+              encrypted SQLite on the `data` branch          static data.json
 ```
+
+**No database service, no cloud account for storage.** Actions runners are
+ephemeral, so the catalog lives in this repository: one SQLite file, gzipped
+and AES-256-GCM encrypted, force-pushed to an orphan `data` branch each run.
+The repo is public; the deal flow is not. The dashboard is a plain static
+site that reads a JSON snapshot the run exports — no client SDK, no per-read
+billing, and Cloudflare Access in front of it.
 
 ---
 
@@ -71,14 +80,20 @@ publishes a total price, and we use theirs rather than guessing.
 python3.12 -m venv .venv && source .venv/bin/activate
 pip install -e '.[dev]'
 
-nippon-margin backfill --local --days 180   # ECB FX history
-nippon-margin scrape   --local              # ~90s across four sources
-nippon-margin analyze  --local
-nippon-margin report   --local --markdown
+nippon-margin backfill --days 180   # ECB FX history
+nippon-margin scrape                # ~90s across four sources
+nippon-margin analyze
+nippon-margin report --markdown
 ```
 
-`--local` uses SQLite at `data/nippon.db` and touches no Firebase quota.
-Everything below runs identically against Firestore without the flag.
+The catalog is `data/nippon.db`. That is the same file CI works on — it just
+pulls it from the `data` branch first and pushes it back afterwards. To see
+the dashboard against your own data:
+
+```bash
+nippon-margin export                        # -> dashboard/public/data.json
+cd dashboard && npm install && npm run dev
+```
 
 ### Commands
 
@@ -89,102 +104,84 @@ Everything below runs identically against Firestore without the flag.
 | `report` | daily digest as Markdown (stdout) and/or HTML (`--out out/digest.html`) |
 | `alert` | Telegram/email for whatever crossed a threshold (`--dry-run` to preview) |
 | `backfill` | seed ECB FX history so the charts have a curve on day one |
-| `doctor` | check config, credentials and store connectivity before a real run |
+| `export` | write the static JSON snapshot the dashboard reads |
+| `sync pull` / `sync push` | restore / persist the encrypted catalog on the `data` branch |
+| `doctor` | check config, credentials and catalog before a real run |
 | `runs` | recent run health — per-adapter counts and errors |
 | `sources` | list every known adapter |
 
 Useful flags: `--dry-run` (parse and print, write nothing), `--source X` (run
-one adapter, even if disabled in config), `--verbose`.
+one adapter, even if disabled in config), `--db PATH`, `--verbose`.
 
 ---
 
 ## What you have to do by hand
 
-Four things need a human. Everything else is committed.
+Three things need a human. Everything else is committed.
 
-### 1. Create the Firebase project and a service account
+### 1. Generate the catalog encryption key
 
-```bash
-npm install -g firebase-tools
-firebase login
-firebase projects:list            # pick one, or:
-firebase projects:create nippon-margin
-```
-
-Then in the [Firebase console](https://console.firebase.google.com):
-
-1. **Build → Firestore Database → Create database.** Production mode.
-   Pick `eur3` (Europe) unless you have a reason not to.
-2. **Build → Authentication → Get started.** Enable **Email/Password** and/or
-   **Google**. Add yourself under **Users** if using email/password.
-3. **⚙ Project settings → Service accounts → Generate new private key.**
-   A JSON file downloads. **Do not commit it** — `.gitignore` already blocks
-   `service-account*.json`, but the file belongs in a password manager.
-4. **⚙ Project settings → General → Your apps → Add app → Web.** Copy the
-   config values; you need `apiKey`, `authDomain`, `projectId`, `appId`.
-
-Put your project id in `config.yaml` under `meta.firebase_project_id`.
-
-### 2. Put your Firebase UID into the security rules
-
-`firestore.rules` allow-lists a single UID. Find yours in
-**Authentication → Users → User UID**, then:
+The catalog is committed to this **public** repository, so it is encrypted.
+Generate a key and keep a copy somewhere safe — lose it and you lose the
+catalog history (the scraper will rebuild from scratch, but every `first_seen`
+date and price-history point is gone):
 
 ```bash
-# firestore.rules
-function allowedUids() {
-  return ['abc123YourActualUid'];   # <- replace REPLACE_WITH_YOUR_FIREBASE_UID
-}
+python -c 'import secrets; print(secrets.token_urlsafe(32))'
 ```
 
-```bash
-firebase deploy --only firestore:rules,firestore:indexes --project <your-project>
-```
+### 2. Add the GitHub secrets
 
-The rules deny **every** client write except the watchlist editor doc, and
-gate all reads on that UID list. Never loosen `isOwner()` to
-`request.auth != null` — that would let anyone with a Google account read your
-deal flow.
-
-### 3. Add the GitHub secrets and variables
-
-**Settings → Secrets and variables → Actions.**
-
-Secrets (encrypted):
+**Settings → Secrets and variables → Actions → New repository secret.**
 
 | name | value |
 |---|---|
-| `FIREBASE_SERVICE_ACCOUNT` | the **entire contents** of the service-account JSON, pasted as one value |
+| `DATA_ENCRYPTION_KEY` | the key you just generated |
 | `TELEGRAM_BOT_TOKEN` | from [@BotFather](https://t.me/BotFather) → `/newbot` |
 | `TELEGRAM_CHAT_ID` | message your bot, then open `https://api.telegram.org/bot<TOKEN>/getUpdates` and read `result[0].message.chat.id` |
+| `CLOUDFLARE_API_TOKEN` | Cloudflare dashboard → My Profile → API Tokens → Create Token → **Cloudflare Pages: Edit** |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare dashboard → Workers & Pages → the ID in the right-hand sidebar (or in the URL) |
 | `SMTP_USERNAME`, `SMTP_PASSWORD` | only if you enable email alerts |
 
-Variables (plain — these are public by design; they identify the project, they
-authorise nothing):
+`GITHUB_TOKEN` is provided automatically; the workflow uses it to push the
+encrypted catalog, which is why `daily.yml` declares `contents: write`.
 
-`FIREBASE_API_KEY`, `FIREBASE_AUTH_DOMAIN`, `FIREBASE_PROJECT_ID`,
-`FIREBASE_APP_ID`
+### 3. Create the Cloudflare Pages project and lock it down
+
+```bash
+npm install -g wrangler
+wrangler login
+wrangler pages project create nippon-margin --production-branch=main
+```
+
+Then, and this is the part that matters — **Cloudflare dashboard → Zero Trust
+→ Access → Applications → Add an application → Self-hosted**:
+
+- **Application domain**: `nippon-margin.pages.dev` (or your custom domain)
+- **Policy**: Action *Allow*, Include → *Emails* → your address only
+- Leave the default *Block* for everything else
+
+Without this the dashboard is a public URL with your entire deal flow on it.
+The Pages project itself has no access control; Cloudflare Access is what
+provides it. Both are free.
+
+Sign-in is a one-time email code per device, which on a phone is a single tap
+from the daily Telegram message.
 
 ### 4. Trigger the first run
 
-**Actions → daily → Run workflow.** It takes ~3 minutes. Optional inputs let
+**Actions → daily → Run workflow.** It takes ~4 minutes. Optional inputs let
 you run a single adapter or do a dry run first.
 
-Verify with **Firestore → Data**: you should see `listings_jp`, `listings_ch`,
-`opportunities`, `model_stats_daily`, `fx_rates`, `runs` and `summaries`.
+Verify it worked three ways: the `data` branch now holds `nippon.db.enc`, the
+Telegram digest arrives, and `https://nippon-margin.pages.dev` shows the
+Opportunities table with today's date in the header.
 
-The dashboard deploys automatically after a successful run, and on any push to
-`main` that touches `dashboard/`. Its URL is
-`https://<project-id>.web.app`.
-
-Locally:
+To pull the catalog down to your laptop afterwards:
 
 ```bash
-cd dashboard && cp .env.example .env   # fill in the four values
-npm install && npm run dev
+DATA_ENCRYPTION_KEY=... nippon-margin sync pull
 ```
-
----
 
 ## Configuration
 
@@ -194,9 +191,11 @@ weights, alert thresholds. Nothing is hardcoded in the engine. Changing the
 watchlist is a git commit, which also gives you a history of what you believed
 the numbers were on any given day.
 
-The one exception: the dashboard's **watchlist editor** writes
-`config/watchlist` in Firestore, which the next run merges over the file. Cost
-parameters are deliberately *not* editable from a browser.
+The dashboard's **Watchlist page** is a builder, not an editor: it gives you
+the `watchlist:` YAML block to paste, with a link straight to the GitHub edit
+view. It deliberately cannot write anything. Keeping the watchlist in git is
+the point — you get a dated record of what you were hunting and why, and
+nothing in a browser can quietly change a tax rate.
 
 Per-model overrides live on each watchlist entry:
 
@@ -293,7 +292,7 @@ Then one line in `config.yaml`:
     tokyocarz: { enabled: true, max_pages: 3, renderer: "http" }
 ```
 
-Iterate with `nippon-margin scrape --source tokyocarz --local --dry-run`,
+Iterate with `nippon-margin scrape --source tokyocarz --dry-run`,
 which prints exactly what parsed. `{base}`, `{query}`, `{make}`, `{model}` and
 `{page}` are substituted; set `renderer: "playwright"` for JS-rendered sites.
 
@@ -327,33 +326,56 @@ is worth having on disk.
 
 ---
 
-## Cost control
+## Cost, and what it runs on
 
-Firestore bills per document read and write, so:
+Nothing here bills. The full stack is a GitHub repository, GitHub Actions
+(~4 minutes a day, free for public repos), Cloudflare Pages with Access (free
+tier), and Telegram. There is no database service and no storage account.
 
-- writes are batched 500 at a time;
-- each listing carries a content fingerprint — an unchanged car costs a
-  `last_seen` touch, not a full rewrite;
-- the daily run precomputes `summaries/opportunities` and `summaries/last_run`,
-  so opening the dashboard is a handful of reads rather than a few thousand;
+The catalog stays small on purpose:
+
 - `sources.only_watchlist: true` discards listings that do not resolve to a
-  watched model before anything is stored.
+  watched model before anything is stored;
+- the `data` branch is force-pushed rather than appended to, so history does
+  not accumulate multi-hundred-KB binaries — point-in-time history lives
+  *inside* the database (`price_history`, `model_stats_daily`) where it can
+  actually be queried;
+- the dashboard snapshot caps opportunities, photos and comp links, so the
+  page stays a ~350 KB download on a phone rather than growing without bound.
 
-The intended steady state is comfortably inside the free tier.
+Today: a 2.8 MB catalog compresses to a ~250 KB encrypted blob.
 
----
+## Security posture
+
+This repository is public; the data is not.
+
+- The catalog on the `data` branch is AES-256-GCM encrypted with a key that
+  only exists as a GitHub secret. Fresh salt and nonce per write, so two
+  commits of identical data differ — git history leaks nothing about how much
+  changed day to day. Tampering fails the auth tag rather than decrypting to
+  garbage.
+- `dashboard/public/data.json` is the whole catalog in plaintext and is
+  **gitignored**. It is generated at build time and only ever served from
+  behind Cloudflare Access.
+- The dashboard is gated by Cloudflare Access, not by anything in the client
+  bundle. There is no auth code to get wrong.
+- Credentials are redacted from every git error this tool raises, so a failed
+  push cannot print a token into an Actions log.
+- Secrets are read from the environment only — never from `config.yaml`, so a
+  config commit can never leak one.
 
 ## Tests
 
 ```bash
-pytest -q          # 156 tests
+pytest -q          # 190 tests
 ruff check src tests
 ```
 
 Both run in CI on every push.
 
-The cost engine and comp matcher are tested hard, because they have to be
-right — a wrong VAT base or a bad comp is a real financial decision. Scraping
+The cost engine, the comp matcher and the state encryption are tested hard,
+because they have to be right — a wrong VAT base is a real financial decision,
+and a broken state blob is the whole catalog. Scraping
 is allowed to be flaky, so adapter tests run against **frozen captures of the
 real pages** rather than the live sites. When a site redesigns, CI fails
 loudly instead of the daily run quietly returning zero for a week:
@@ -364,8 +386,13 @@ python scripts/capture_fixture.py exportfrom   # refresh after fixing selectors
 
 Several tests exist because of bugs found by running this against live data —
 a Quattroporte filed as a GranTurismo, a BMW 3 Series "Gran Turismo" priced
-against Maserati comps, an SLK matched as an SL, and AutoUncle's savings badge
-being read as a CHF 3,700 asking price for a 911.
+against Maserati comps, an SLK matched as an SL, AutoUncle's savings badge
+being read as a CHF 3,700 asking price for a 911, and trend windows anchored
+to `date.today()` that reported "no movement" after a few failed runs.
+
+`tests/test_statesync.py` runs against a real bare git repository rather than
+mocks, because the failure being guarded against is "the push silently did not
+authenticate", which a mock would never catch.
 
 ---
 
@@ -373,17 +400,18 @@ being read as a CHF 3,700 asking price for a 911.
 
 ```
 config.yaml                  every business parameter
-firestore.rules              UID allow-list; client writes denied
 src/nippon_margin/
   costs.py                   landed cost engine
   matching.py                comps, scoring, dedupe
   fx.py                      ECB rates + margin impact
   parse.py                   text → numbers, shared by all adapters
   http.py                    throttle, robots, cache, Playwright
+  crypto.py                  AES-256-GCM for the committed catalog
+  statesync.py               pull/push the catalog on the `data` branch
   adapters/                  base + registry + per-source modules
-  pipeline/                  scrape → analyze → report → alert
-  store/                     SQLite (--local) and Firestore backends
-dashboard/                   Vite + React + Tailwind, deployed to Hosting
+  pipeline/                  scrape → analyze → report → alert → export
+  store/                     SQLite catalog
+dashboard/                   Vite + React + Tailwind → Cloudflare Pages
 tests/fixtures/              frozen captures of real listing pages
 ```
 
@@ -403,3 +431,9 @@ tests/fixtures/              frozen captures of real listing pages
   200k-km car are not the same trade.
 - **Auction grades are rarely published on export sites.** Where a grade is
   missing the risk flag is silent; confirm before bidding.
+- **The dashboard is as fresh as the last run**, not live. The header shows
+  the snapshot age and turns amber past 36 hours, which is the signal that the
+  daily workflow has stopped working.
+- **Losing `DATA_ENCRYPTION_KEY` loses the catalog history.** The scraper
+  rebuilds from scratch, but `first_seen` dates and price history do not come
+  back. Keep a copy outside GitHub.

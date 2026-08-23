@@ -4,9 +4,9 @@ import { HashRouter } from 'react-router-dom'
 import App from './App'
 import './index.css'
 
-// HashRouter, not BrowserRouter: Firebase Hosting rewrites everything to
-// index.html anyway, and hash routes survive a hard refresh on mobile
-// without any server config at all.
+// HashRouter, not BrowserRouter: hash routes survive a hard refresh on a
+// static host with no SPA rewrite rules, which is exactly what Cloudflare
+// Pages serves here.
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <HashRouter>

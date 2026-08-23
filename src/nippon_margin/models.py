@@ -329,11 +329,11 @@ def normalise_ws(text: str) -> str:
 
 
 def make_doc_id(source: str, source_ref: str) -> str:
-    """Firestore-safe deterministic document id.
+    """Deterministic, filesystem- and URL-safe document id.
 
-    Firestore ids may not contain `/` and are capped at 1500 bytes; some
-    exporters use full URLs as their only stable reference, so anything
-    unsafe or overlong collapses to a hash suffix.
+    Some exporters use a full URL as their only stable reference, so anything
+    containing separators or running long collapses to a hash suffix. Keeping
+    ids opaque-but-stable is what makes upserts idempotent across runs.
     """
     ref = re.sub(r"[^A-Za-z0-9_.\-]", "-", source_ref).strip("-")
     if not ref or len(ref) > 120:

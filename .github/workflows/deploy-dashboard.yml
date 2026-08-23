@@ -1,15 +1,15 @@
 name: deploy-dashboard
 
+# Ships dashboard code changes without waiting for tomorrow's scrape.
+# The daily workflow deploys too, and that one carries fresh data; this one
+# reuses whatever data.json the last run left on the `data` branch.
+
 on:
   push:
     branches: [main]
     paths:
       - "dashboard/**"
-      - "firebase.json"
-      - "firestore.rules"
-      - "firestore.indexes.json"
       - ".github/workflows/deploy-dashboard.yml"
-  workflow_call:
   workflow_dispatch:
 
 permissions:
@@ -22,6 +22,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Restore catalog and re-export
+        # Without this the deployed bundle would ship no data at all.
+        env:
+          DATA_ENCRYPTION_KEY: ${{ secrets.DATA_ENCRYPTION_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          nippon-margin sync pull
+          nippon-margin export --out dashboard/public/data.json
+
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
@@ -31,21 +50,14 @@ jobs:
       - name: Build
         working-directory: dashboard
         env:
-          # Firebase web config is public by design -- it identifies the
-          # project, it does not authorise anything. Access is enforced by
-          # Firebase Auth plus the Firestore rules in firestore.rules.
-          VITE_FIREBASE_API_KEY: ${{ vars.FIREBASE_API_KEY }}
-          VITE_FIREBASE_AUTH_DOMAIN: ${{ vars.FIREBASE_AUTH_DOMAIN }}
-          VITE_FIREBASE_PROJECT_ID: ${{ vars.FIREBASE_PROJECT_ID }}
-          VITE_FIREBASE_APP_ID: ${{ vars.FIREBASE_APP_ID }}
+          VITE_REPO_SLUG: ${{ github.repository }}
         run: |
           npm ci
           npm run build
 
-      - name: Deploy hosting + Firestore rules
-        uses: FirebaseExtended/action-hosting-deploy@v0
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
         with:
-          repoToken: ${{ secrets.GITHUB_TOKEN }}
-          firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-          projectId: ${{ vars.FIREBASE_PROJECT_ID }}
-          channelId: live
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy dashboard/dist --project-name=nippon-margin --branch=main

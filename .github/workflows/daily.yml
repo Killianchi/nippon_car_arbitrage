@@ -17,18 +17,20 @@ on:
         default: false
 
 concurrency:
+  # The catalog is a single file force-pushed to the `data` branch. Two runs
+  # at once would silently discard one of their results.
   group: daily
   cancel-in-progress: false
 
 permissions:
-  contents: read
+  contents: write   # push the encrypted catalog to the `data` branch
 
 jobs:
   run:
     runs-on: ubuntu-latest
-    # The whole cycle should take ~3 minutes; 15 is the budget before we
-    # assume something is hanging and would rather have a red run than a
-    # runner sitting on a dead socket.
+    # The whole cycle takes ~3 minutes; 15 is the budget before we assume
+    # something is hanging and would rather have a red run than a runner
+    # sitting on a dead socket.
     timeout-minutes: 15
 
     steps:
@@ -42,12 +44,20 @@ jobs:
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          pip install -e '.[firestore,browser]'
+          pip install -e '.[browser]'
 
       - name: Install Playwright Chromium
-        # Only carused.jp may need a browser, and only if it stops
-        # server-rendering. Chromium alone, with its OS deps.
+        # Only needed if a source flips to renderer: playwright in config.yaml.
         run: python -m playwright install --with-deps chromium
+
+      - name: Restore catalog
+        # Decrypts the SQLite database from the `data` branch. A wrong key
+        # fails here rather than silently starting from an empty catalog and
+        # throwing away every first_seen date and price-history point.
+        env:
+          DATA_ENCRYPTION_KEY: ${{ secrets.DATA_ENCRYPTION_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: nippon-margin sync pull
 
       - name: Restore HTML cache
         uses: actions/cache/restore@v4
@@ -57,20 +67,10 @@ jobs:
           restore-keys: html-cache-
 
       - name: Scrape
-        id: scrape
-        env:
-          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: |
           nippon-margin scrape \
             ${{ inputs.source && format('--source {0}', inputs.source) || '' }} \
             ${{ inputs.dry_run && '--dry-run' || '' }}
-
-      - name: Analyze
-        # Even if a source broke, whatever landed is still worth pricing.
-        if: ${{ !inputs.dry_run }}
-        env:
-          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-        run: nippon-margin analyze
 
       - name: Weekly - Ricardo completed auctions
         # Sundays only. Ricardo lists *completed* auctions, i.e. what cars
@@ -79,8 +79,6 @@ jobs:
         # inside a polite request budget.
         if: ${{ !inputs.dry_run && !inputs.source }}
         continue-on-error: true
-        env:
-          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: |
           if [ "$(date -u +%u)" = "7" ]; then
             nippon-margin scrape --source ricardo
@@ -88,16 +86,21 @@ jobs:
             echo "not Sunday; skipping Ricardo"
           fi
 
+      - name: Analyze
+        if: ${{ !inputs.dry_run }}
+        run: nippon-margin analyze
+
       - name: Report
         if: ${{ !inputs.dry_run }}
-        env:
-          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: nippon-margin report --out out/digest.html
+
+      - name: Export dashboard data
+        if: ${{ !inputs.dry_run }}
+        run: nippon-margin export --out dashboard/public/data.json
 
       - name: Alert
         if: ${{ !inputs.dry_run }}
         env:
-          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
@@ -110,9 +113,41 @@ jobs:
             nippon-margin alert --digest --evidence
           fi
 
+      - name: Persist catalog
+        # Encrypt and force-push. Runs even if a later step failed, so a
+        # partial scrape is still not lost -- but never on a dry run.
+        if: ${{ always() && !inputs.dry_run }}
+        env:
+          DATA_ENCRYPTION_KEY: ${{ secrets.DATA_ENCRYPTION_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: nippon-margin sync push -m "Catalog ${{ github.run_id }}"
+
+      - name: Set up Node
+        if: ${{ !inputs.dry_run }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: Bundle dashboard
+        if: ${{ !inputs.dry_run }}
+        working-directory: dashboard
+        env:
+          VITE_REPO_SLUG: ${{ github.repository }}
+        run: |
+          npm ci
+          npm run build
+
+      - name: Deploy to Cloudflare Pages
+        if: ${{ !inputs.dry_run }}
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy dashboard/dist --project-name=nippon-margin --branch=main
+
       - name: Save HTML cache
-        # Keeps the next run's diffs cheap; always, so a failed run still
-        # leaves the pages behind for debugging.
         if: always()
         uses: actions/cache/save@v4
         with:
@@ -138,9 +173,3 @@ jobs:
             evidence/
           retention-days: 30
           if-no-files-found: ignore
-
-  deploy-dashboard:
-    needs: run
-    if: ${{ success() && !inputs.dry_run }}
-    uses: ./.github/workflows/deploy-dashboard.yml
-    secrets: inherit

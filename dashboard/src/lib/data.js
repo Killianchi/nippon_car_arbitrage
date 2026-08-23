@@ -1,64 +1,54 @@
-// Firestore reads.
+// Data access: one static JSON snapshot, fetched once and memoised.
 //
-// Cost discipline: the dashboard never scans `listings_*`. The daily run
-// precomputes `summaries/opportunities`, `summaries/last_run` and the
-// per-model daily stats, so a cold open is a handful of document reads
-// rather than a few thousand.
-import {
-  collection, doc, getDoc, getDocs, limit as fsLimit,
-  orderBy, query, setDoc, where,
-} from 'firebase/firestore'
-import { db } from './firebase'
+// The daily run writes `data.json` next to the bundle (`nippon-margin export`).
+// There is no client SDK, no per-read billing, and no auth code here --
+// Cloudflare Access sits in front of the whole site and is what keeps this
+// private. The data is exactly as fresh as the last run, which is honest:
+// it only changes once a day.
 
-export async function fetchOpportunities({ max = 200 } = {}) {
-  const q = query(
-    collection(db, 'opportunities'),
-    orderBy('opportunity_score', 'desc'),
-    fsLimit(max),
-  )
-  const snap = await getDocs(q)
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+let cache = null
+
+async function snapshot() {
+  if (!cache) {
+    cache = fetch(`${import.meta.env.BASE_URL}data.json`, { cache: 'no-cache' })
+      .then((r) => {
+        if (!r.ok) throw new Error(`data.json returned ${r.status}`)
+        return r.json()
+      })
+      .catch((e) => {
+        cache = null // let a retry actually retry
+        throw e
+      })
+  }
+  return cache
 }
 
-export async function fetchSummary(name) {
-  const snap = await getDoc(doc(db, 'summaries', name))
-  return snap.exists() ? snap.data() : null
+export async function fetchOpportunities() {
+  return (await snapshot()).opportunities || []
 }
 
-export async function fetchModelStats(watchlistKey, { days = 120 } = {}) {
-  const clauses = [collection(db, 'model_stats_daily')]
-  if (watchlistKey) clauses.push(where('watchlist_key', '==', watchlistKey))
-  clauses.push(orderBy('day', 'desc'), fsLimit(days))
-  const snap = await getDocs(query(...clauses))
-  return snap.docs.map((d) => d.data()).reverse()
+export async function fetchModelStats(watchlistKey) {
+  const rows = (await snapshot()).model_stats || []
+  return watchlistKey ? rows.filter((r) => r.watchlist_key === watchlistKey) : rows
 }
 
-export async function fetchFx({ days = 120 } = {}) {
-  const q = query(collection(db, 'fx_rates'), orderBy('day', 'desc'), fsLimit(days))
-  const snap = await getDocs(q)
-  return snap.docs.map((d) => d.data()).reverse()
+export async function fetchFx() {
+  return (await snapshot()).fx || []
 }
 
-export async function fetchRuns({ max = 20 } = {}) {
-  const q = query(collection(db, 'runs'), orderBy('started_at', 'desc'), fsLimit(max))
-  const snap = await getDocs(q)
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+export async function fetchFxMeta() {
+  const data = await snapshot()
+  return { moves: data.fx_moves || {}, impacts: data.fx_impacts || [] }
+}
+
+export async function fetchRuns() {
+  return (await snapshot()).runs || []
 }
 
 export async function fetchWatchlist() {
-  const snap = await getDoc(doc(db, 'config', 'watchlist'))
-  return snap.exists() ? snap.data().items || [] : []
+  return (await snapshot()).watchlist || []
 }
 
-/**
- * The only client write the rules permit. Cost parameters stay in
- * config.yaml on purpose -- nothing in a browser should be able to change a
- * tax rate.
- */
-export async function saveWatchlist(items, uid) {
-  await setDoc(doc(db, 'config', 'watchlist'), {
-    items,
-    updated_at: new Date().toISOString(),
-    updated_by: uid || 'dashboard',
-  })
+export async function fetchGeneratedAt() {
+  return (await snapshot()).generated_at || null
 }

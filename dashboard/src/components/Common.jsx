@@ -3,15 +3,17 @@ export function Loading({ what = 'data' }) {
 }
 
 export function ErrorBox({ error }) {
-  const denied = /permission|insufficient/i.test(String(error?.message || error))
+  const message = String(error?.message || error)
+  const missing = /data\.json|404|Failed to fetch/i.test(message)
   return (
     <div className="card p-4">
-      <p className="text-sm text-neg">{String(error?.message || error)}</p>
-      {denied && (
+      <p className="text-sm text-neg">{message}</p>
+      {missing && (
         <p className="mt-2 text-xs text-neutral-500">
-          The rules allow-list your Firebase UID explicitly. Put your UID into
-          <code className="mx-1">allowedUids()</code> in <code>firestore.rules</code>
-          and redeploy with <code>firebase deploy --only firestore:rules</code>.
+          The dashboard reads a static <code>data.json</code> written by the daily run.
+          If it is missing, the last run did not reach its export step — check the
+          Health page, or regenerate locally with
+          <code className="mx-1">nippon-margin export</code>.
         </p>
       )}
     </div>

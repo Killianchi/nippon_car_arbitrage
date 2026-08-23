@@ -9,10 +9,7 @@ export default defineConfig({
     // its own chunk and only loads on the pages that draw charts.
     rollupOptions: {
       output: {
-        manualChunks: {
-          firebase: ['firebase/app', 'firebase/auth', 'firebase/firestore'],
-          charts: ['recharts'],
-        },
+        manualChunks: { charts: ['recharts'] },
       },
     },
     chunkSizeWarningLimit: 700,
