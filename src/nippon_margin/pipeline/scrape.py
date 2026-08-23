@@ -20,7 +20,7 @@ from ..config import Config
 from ..fx import refresh_fx
 from ..http import Fetcher
 from ..matching import mark_duplicates
-from ..models import AdapterResult, ChListing, JpListing, RunRecord
+from ..models import AdapterResult, ChListing, JpListing, RunRecord, Steering
 from ..store.base import Store
 
 log = logging.getLogger(__name__)
@@ -88,6 +88,12 @@ async def scrape(cfg: Config, store: Store, *, only: str | None = None,
             run.errors.append(f"{result.source}: {result.error}")
         for listing in listings:
             (jp if isinstance(listing, JpListing) else ch).append(listing)
+
+    if cfg.risk.exclude_rhd:
+        before = len(jp)
+        jp = [lst for lst in jp if lst.steering is not Steering.RHD]
+        if before != len(jp):
+            log.info("dropped %d right-hand-drive listings", before - len(jp))
 
     if cfg.sources.only_watchlist:
         before_jp, before_ch = len(jp), len(ch)
