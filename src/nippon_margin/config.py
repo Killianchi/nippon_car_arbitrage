@@ -132,6 +132,38 @@ class ScoringConfig(Base):
 class RiskConfig(Base):
     #: Country the cost assumptions were quoted for. Anything else is flagged.
     assumed_origin: str = "JAPAN"
+    #: Countries whose stock is worth buying. Empty means "anywhere".
+    allowed_origins: list[str] = Field(default_factory=list)
+    #: Keep listings whose location the exporter does not publish. Some
+    #: Japan-only sites simply never print one, so dropping unknowns would
+    #: discard good stock along with the bad.
+    allow_unknown_origin: bool = True
+
+    #: Place -> country. Exporters print a city, a region or a country with no
+    #: consistency ("Yokohama", "Kyushu", "Korea"), so a raw last-comma-token
+    #: is not a country. Anything unmapped stays as written, which fails an
+    #: allow-list rather than sneaking through it.
+    origin_aliases: dict[str, str] = Field(default_factory=dict)
+
+    def resolve_origin(self, location: str | None) -> str | None:
+        """Country for a printed location, via the alias map."""
+        if not location:
+            return None
+        aliases = {k.strip().upper(): v.strip().upper() for k, v in self.origin_aliases.items()}
+        # Try the whole string first, then the last comma-separated part:
+        # "Incheon, SOUTH KOREA" resolves on the tail, "Yokohama" on the whole.
+        for candidate in (location, location.split(",")[-1]):
+            key = candidate.strip().upper()
+            if key in aliases:
+                return aliases[key]
+        return location.split(",")[-1].strip().upper() or None
+
+    def origin_allowed(self, origin: str | None) -> bool:
+        if not self.allowed_origins:
+            return True
+        if origin is None:
+            return self.allow_unknown_origin
+        return origin.strip().upper() in {o.strip().upper() for o in self.allowed_origins}
     min_auction_grade: float = 4.0
     penalise_rhd: bool = True
     #: Drop right-hand-drive listings outright rather than merely flagging
@@ -209,10 +241,28 @@ class WatchItem(Base):
     #: AutoUncle/Autolina URL slug when it differs from `model`
     #: (their SL lives at `mercedes-benz/sl-class`, not `.../sl`).
     ch_model_slug: str | None = None
+    #: Generation bounds. A model name outlives its generation -- "8 Series"
+    #: is both a 1990 E31 and a 2025 M850i -- so an entry that wants one
+    #: generation says so here rather than hoping the aliases are specific
+    #: enough.
+    year_min: int | None = None
+    year_max: int | None = None
     max_km: int | None = None
     min_grade: float | None = None
     homologation_mfk_chf: float | None = None
     risk_notes: list[str] = Field(default_factory=list)
+
+    def year_ok(self, year: int | None) -> bool:
+        """Is a listing year inside this entry's generation window?
+
+        An unknown year passes: most sources state one, and discarding the
+        few that do not would cost more than it saves.
+        """
+        if year is None:
+            return True
+        if self.year_min is not None and year < self.year_min:
+            return False
+        return not (self.year_max is not None and year > self.year_max)
 
     def search_terms(self) -> list[str]:
         """Everything a JP or CH search page might call this car."""

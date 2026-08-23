@@ -284,3 +284,70 @@ class TestSteering:
         off.risk.exclude_rhd = False
         assert off.risk.exclude_rhd is False
         assert cfg.risk.exclude_rhd is True
+
+
+class TestOriginFilter:
+    """Japanese exporters sell plenty of stock that is not in Japan. Korea is
+    a different trade: different freight, different paperwork, and no auction
+    grading, so condition cannot be verified the same way."""
+
+    def test_only_allowed_origins_survive(self, cfg):
+        assert cfg.risk.origin_allowed("JAPAN") is True
+        assert cfg.risk.origin_allowed("SOUTH KOREA") is False
+
+    def test_case_and_spacing_do_not_matter(self, cfg):
+        assert cfg.risk.origin_allowed(" japan ") is True
+
+    def test_an_unpublished_location_is_kept_by_default(self, cfg):
+        """exportfrom.jp prints no location and sells Japanese stock only."""
+        assert cfg.risk.origin_allowed(None) is True
+
+    def test_unknowns_can_be_excluded(self, cfg):
+        strict = cfg.model_copy(deep=True)
+        strict.risk.allow_unknown_origin = False
+        assert strict.risk.origin_allowed(None) is False
+
+    def test_an_empty_allow_list_permits_anywhere(self, cfg):
+        anywhere = cfg.model_copy(deep=True)
+        anywhere.risk.allowed_origins = []
+        assert anywhere.risk.origin_allowed("SOUTH KOREA") is True
+
+
+class TestOriginResolution:
+    """Exporters print a city, a region or a country with no consistency.
+    BE FORWARD writes "Yokohama" and "Korea" in the same column, so a raw
+    last-token read makes "YOKOHAMA" look like a country."""
+
+    @pytest.mark.parametrize("location,expected", [
+        ("Yokohama", "JAPAN"),
+        ("Kyushu", "JAPAN"),
+        ("Tokyo, JAPAN", "JAPAN"),
+        ("Korea", "SOUTH KOREA"),
+        ("Incheon, SOUTH KOREA", "SOUTH KOREA"),
+    ])
+    def test_places_resolve_to_countries(self, cfg, location, expected):
+        assert cfg.risk.resolve_origin(location) == expected
+
+    def test_an_unmapped_place_fails_the_allow_list(self, cfg):
+        """The safe direction: lose stock rather than buy from somewhere
+        unintended. The scrape log names unmapped origins so they can be added."""
+        resolved = cfg.risk.resolve_origin("Busan")
+        assert resolved == "BUSAN"
+        assert cfg.risk.origin_allowed(resolved) is False
+
+    def test_no_location_resolves_to_none(self, cfg):
+        assert cfg.risk.resolve_origin(None) is None
+        assert cfg.risk.resolve_origin("") is None
+
+    def test_korean_stock_is_excluded_end_to_end(self, cfg):
+        from nippon_margin.models import JpListing
+
+        korean = JpListing(source="beforward", source_ref="k", make="BMW",
+                           model="8 Series", location="Korea")
+        japanese = JpListing(source="beforward", source_ref="j", make="BMW",
+                             model="8 Series", location="Yokohama")
+        kept = [
+            lst for lst in (korean, japanese)
+            if cfg.risk.origin_allowed(cfg.risk.resolve_origin(lst.location))
+        ]
+        assert [lst.source_ref for lst in kept] == ["j"]

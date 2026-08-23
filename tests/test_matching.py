@@ -568,3 +568,27 @@ class TestCompSpreadFlag:
     def test_no_comps_means_no_spread_flag(self, cfg):
         flags = risk_flags(cfg, jp(), CompStats(comp_count=0))
         assert not any("Comps disagree" in f for f in flags)
+
+
+class TestGenerationBounds:
+    """A model name outlives its generation: `8 Series` is both a 1990 E31
+    and a 2025 M850i, and BE FORWARD stocks plenty of the latter."""
+
+    def test_the_e31_window_excludes_the_modern_car(self, cfg):
+        assert resolve_watchlist_key(cfg, make="BMW", model="8 Series", year=1994) == "bmw_850i_e31"
+        assert resolve_watchlist_key(cfg, make="BMW", model="8 Series", year=2025) is None
+
+    def test_the_911_window_excludes_the_992(self, cfg):
+        assert resolve_watchlist_key(cfg, make="Porsche", model="911 Carrera", year=2012) == "porsche_911"
+        assert resolve_watchlist_key(cfg, make="Porsche", model="911 Carrera", year=2022) is None
+
+    def test_an_unknown_year_still_matches(self, cfg):
+        """Most sources state a year; discarding the few that do not costs more."""
+        assert resolve_watchlist_key(cfg, make="BMW", model="8 Series", year=None) == "bmw_850i_e31"
+
+    def test_a_model_code_match_also_respects_the_window(self, cfg):
+        assert resolve_watchlist_key(cfg, make="", model="", model_code="E31", year=2025) is None
+        assert resolve_watchlist_key(cfg, make="", model="", model_code="E31", year=1994) == "bmw_850i_e31"
+
+    def test_an_unbounded_entry_accepts_any_year(self, cfg):
+        assert resolve_watchlist_key(cfg, make="Porsche", model="Cayenne", year=2024) == "porsche_cayenne"

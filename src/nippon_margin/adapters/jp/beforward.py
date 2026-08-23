@@ -39,6 +39,11 @@ STEERING_FILTER = "steering=Left"
 _DETAIL = re.compile(r"^/[a-z0-9\-]+/[a-z0-9\-]+/([a-z0-9]+)/id/(\d+)/?$", re.I)
 _MAKE_LINK = re.compile(r'href="/stocklist/make=(\d+)/sortkey=n"[^>]*>\s*([A-Z][A-Z\- ]{1,24})')
 
+#: `<a href="/stocklist/make=106/model=1108/...">MERCEDES-BENZ G-Class</a>`
+_MODEL_LINK = re.compile(
+    r'href="/stocklist/make=(\d+)/model=(\d+)[^"]*"[^>]*>\s*([A-Za-z0-9\-. ]{2,40})'
+)
+
 
 class BeForwardAdapter(JpAdapter):
     name = "beforward"
@@ -47,34 +52,60 @@ class BeForwardAdapter(JpAdapter):
     def __init__(self, *args, **kw):
         super().__init__(*args, **kw)
         self._make_ids: dict[str, str] = {}
+        self._targets: list[tuple[str, str]] = []
 
     async def run(self) -> list[JpListing]:
-        # Resolve make ids before the base class walks search_urls().
+        # Two levels of ids have to be resolved before the base class walks
+        # search_urls(). Filtering by make alone returns the whole make
+        # newest-first, which for Mercedes means C-Classes and Actros trucks:
+        # a watchlist model never surfaces on the first pages, so the source
+        # contributed 50 listings and 0 matches.
         index = await self.fetch_page(f"{self.base_url}/stocklist/")
         if index:
             self._make_ids = {
                 name.strip().upper(): make_id for make_id, name in _MAKE_LINK.findall(index)
             }
             log.info("beforward: resolved %d make ids", len(self._make_ids))
+
+        await self._resolve_models()
         return await super().run()
 
+    async def _resolve_models(self) -> None:
+        """Map each watched make+model onto beforward's numeric model id."""
+        # Keyed by make this was a dict, which silently kept only the last
+        # entry per manufacturer: four Mercedes watch items collapsed to one,
+        # so G-Class and SL were never looked up at all.
+        for name, make_id in self._make_ids.items():
+            items = [w for w in self.cfg.watchlist if _same_make(name, w.make)]
+            if not items:
+                continue
+            page = await self.fetch_page(
+                f"{self.base_url}/stocklist/make={make_id}/{STEERING_FILTER}/sortkey=n/"
+            )
+            if not page:
+                continue
+            for found_make, model_id, label in _MODEL_LINK.findall(page):
+                if found_make != make_id:
+                    continue
+                # "MERCEDES-BENZ G-Class" -> "G-Class"
+                model_name = re.sub(r"^[A-Z\-]+\s+", "", label.strip(), count=1)
+                for item in items:
+                    if _model_matches(model_name, item):
+                        self._targets.append((make_id, model_id))
+                        break
+        log.info("beforward: resolved %d make/model targets", len(self._targets))
+
     def search_urls(self) -> Iterable[str]:
-        wanted = {w.make.upper() for w in self.cfg.watchlist}
-        ids = {
-            make_id
-            for name, make_id in self._make_ids.items()
-            if any(_same_make(name, w) for w in wanted)
-        }
-        if not ids:
-            # Make ids unavailable (first run, or the index changed shape):
-            # fall back to the make-less list rather than scraping nothing.
+        if not self._targets:
+            # Ids unresolved (first run, or the index changed shape): fall back
+            # to the unfiltered list rather than scraping nothing.
             yield f"{self.base_url}/stocklist/{STEERING_FILTER}/sortkey=n/"
             return
-        for make_id in sorted(ids):
+        for make_id, model_id in sorted(set(self._targets)):
             for page in range(1, self.source_cfg.max_pages + 1):
                 suffix = "" if page == 1 else f"page={page}/"
                 yield (
-                    f"{self.base_url}/stocklist/make={make_id}"
+                    f"{self.base_url}/stocklist/make={make_id}/model={model_id}"
                     f"/{STEERING_FILTER}/sortkey=n/{suffix}"
                 )
 
@@ -121,6 +152,12 @@ class BeForwardAdapter(JpAdapter):
         specs = _basic_spec(row)
         stock_code = _DETAIL.match(href).group(1).upper()
 
+        # BE FORWARD prints the country in the spec strip ("Location Korea").
+        # Most of its stock for these models is NOT in Japan -- 29 of 31 cards
+        # on the 8-Series page sit in Korea -- so leaving this uncaptured let
+        # Korean cars through the origin filter as "location unknown".
+        location = specs.get("location")
+
         return JpListing(
             source=self.name,
             source_ref=ref,
@@ -136,6 +173,7 @@ class BeForwardAdapter(JpAdapter):
             # The stock list is filtered to left-hand drive by the URL above.
             steering=Steering.LHD,
             chassis_no=stock_code,
+            location=location,
             description=f"{title} | ref {stock_code} | "
                         + " ".join(f"{k}: {v}" for k, v in specs.items()),
             image_urls=[
@@ -160,6 +198,22 @@ def _basic_spec(row) -> dict[str, str]:
         if key and value:
             specs[key] = value
     return specs
+
+
+def _model_matches(site_model: str, item) -> bool:
+    """Does beforward's model label name the watched model?
+
+    Their labels are broad families ("G-Class", "911"), so this compares
+    against the watchlist model and its aliases rather than a trim.
+    """
+    from ...matching import contains_phrase
+
+    for candidate in (item.model, *item.aliases):
+        if not candidate:
+            continue
+        if contains_phrase(site_model, candidate) or contains_phrase(candidate, site_model):
+            return True
+    return False
 
 
 def _same_make(site_name: str, wanted: str) -> bool:

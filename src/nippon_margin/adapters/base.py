@@ -141,6 +141,7 @@ class JpAdapter(Adapter):
                 model_code=listing.model_code,
                 variant=listing.variant,
                 description=listing.description,
+                year=listing.year,
             )
         return listing
 
@@ -156,5 +157,6 @@ class ChAdapter(Adapter):
                 make=listing.make,
                 model=listing.model,
                 variant=listing.variant,
+                year=listing.year,
             )
         return listing

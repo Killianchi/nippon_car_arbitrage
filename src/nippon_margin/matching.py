@@ -83,7 +83,8 @@ def contains_phrase(haystack: str, phrase: str) -> bool:
 def resolve_watchlist_key(cfg: Config, *, make: str, model: str,
                           model_code: str | None = None,
                           variant: str | None = None,
-                          description: str = "") -> str | None:
+                          description: str = "",
+                          year: int | None = None) -> str | None:
     """Decide which watchlist entry a listing belongs to, or None.
 
     Model codes win when present -- `463276` is unambiguous where the free-text
@@ -92,7 +93,7 @@ def resolve_watchlist_key(cfg: Config, *, make: str, model: str,
     if model_code:
         code = model_code.strip().upper()
         for item in cfg.watchlist:
-            if any(code == c.strip().upper() for c in item.model_codes):
+            if any(code == c.strip().upper() for c in item.model_codes) and item.year_ok(year):
                 return item.key
 
     haystack = normalise(" ".join(filter(None, [make, model, variant])))
@@ -105,6 +106,8 @@ def resolve_watchlist_key(cfg: Config, *, make: str, model: str,
         # against Maserati comps -- which is exactly the kind of nonsense
         # that reads as a 400% margin at the top of the digest.
         if not make_compatible(make, item.make):
+            continue
+        if not item.year_ok(year):
             continue
         for term in item.search_terms():
             t = normalise(term)
@@ -358,7 +361,7 @@ def risk_flags(cfg: Config, jp: JpListing, stats: CompStats) -> list[str]:
     if jp.repair_history:
         flags.append("Repair history declared")
 
-    origin = jp.origin_country
+    origin = cfg.risk.resolve_origin(jp.location)
     if origin and origin != cfg.risk.assumed_origin:
         _, _, using_default = cfg.costs.shipping.for_origin(origin)
         detail = "freight, paperwork and export rules all differ"
@@ -455,7 +458,7 @@ def build_opportunity(
         fx_usd_chf=fx_usd_chf,
         price_terms=terms,
         watchlist_key=jp.watchlist_key,
-        origin=jp.origin_country,
+        origin=cfg.risk.resolve_origin(jp.location),
     )
     # The RoRo figure is the headline: it is what a single car actually costs
     # today, without waiting for two more cars to fill a container.

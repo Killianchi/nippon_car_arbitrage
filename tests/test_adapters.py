@@ -151,8 +151,17 @@ class TestAutoUncle:
         assert len(cantons) >= 3
         assert "Zürich" in cantons or "Zug" in cantons
 
-    def test_all_resolve_to_the_911_watch_entry(self, listings):
-        assert all(x.watchlist_key == "porsche_911" for x in listings)
+    def test_only_in_generation_911s_resolve_to_the_watch_entry(self, cfg, listings):
+        """The page mixes 996-991 cars with 992s. The watch entry wants
+        1998-2019, so the 992s must not become comps for a car we would buy."""
+        item = cfg.watch_item("porsche_911")
+        keyed = [x for x in listings if x.watchlist_key == "porsche_911"]
+        assert keyed, "no 911 resolved at all"
+        assert all(item.year_ok(x.year) for x in keyed)
+
+        out_of_window = [x for x in listings if x.year and not item.year_ok(x.year)]
+        assert out_of_window, "fixture no longer contains an out-of-generation car"
+        assert all(x.watchlist_key is None for x in out_of_window)
 
     def test_year_and_mileage_are_parsed(self, listings):
         assert sum(1 for x in listings if x.year) >= 20
