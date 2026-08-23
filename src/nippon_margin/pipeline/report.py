@@ -135,8 +135,11 @@ def _markdown_opportunity(index: int, o: Opportunity) -> list[str]:
         f"   Liquidity {o.liquidity_score:.2f} · {o.expected_holding_days}d expected · "
         f"tier {o.capital_tier}",
     ]
-    if o.mileage_km:
-        out.append(f"   {o.mileage_km:,} km")
+    detail = [f"{o.mileage_km:,} km"] if o.mileage_km else []
+    if o.location:
+        detail.append(f"in {o.location}")
+    if detail:
+        out.append("   " + " · ".join(detail))
     if o.risk_flags:
         out.append("   ⚠️ " + "; ".join(o.risk_flags[:3]))
     if o.url:

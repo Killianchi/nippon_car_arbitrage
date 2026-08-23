@@ -79,9 +79,14 @@ class TestTaxChain:
         b = compute_landed(cfg, price_usd=30_000, fx_usd_chf=0.88, mode=ShippingMode.RORO)
         assert b.cif_chf == pytest.approx(b.fob_chf + b.freight_chf + b.insurance_chf, abs=0.01)
 
-    def test_fta_note_is_raised_while_duty_is_zero(self, cfg):
+    def test_zero_duty_carries_a_note_telling_you_to_confirm_it(self, cfg):
         b = compute_landed(cfg, price_usd=30_000, fx_usd_chf=0.88, mode=ShippingMode.RORO)
-        assert any("certificate of origin" in n.lower() for n in b.notes)
+        assert any("confirm the basis" in n.lower() for n in b.notes)
+
+    def test_the_duty_note_names_the_actual_origin(self, cfg):
+        b = compute_landed(cfg, price_usd=30_000, fx_usd_chf=0.88,
+                           mode=ShippingMode.RORO, origin="SOUTH KOREA")
+        assert any("SOUTH KOREA" in n for n in b.notes)
 
     def test_duty_applies_when_configured(self, cfg):
         dutied = cfg.model_copy(deep=True)
@@ -196,3 +201,37 @@ class TestCapitalCost:
     def test_negative_inputs_are_clamped(self, cfg):
         assert capital_cost(cfg, -5, 90) == 0.0
         assert capital_cost(cfg, 100_000, -5) == 0.0
+
+
+class TestOrigin:
+    """A Japanese exporter's stock is not necessarily in Japan: 48 of 50 of
+    SBT's LHD Porsches sit in Incheon. Freight, paperwork and grading follow
+    the car, not the website."""
+
+    def test_an_unconfigured_origin_falls_back_and_says_so(self, cfg):
+        b = compute_landed(cfg, price_usd=30_000, fx_usd_chf=0.80,
+                           mode=ShippingMode.RORO, origin="SOUTH KOREA")
+        assert b.freight_chf == cfg.costs.shipping.roro_chf
+        assert any("freight figure is the one quoted for JAPAN" in n for n in b.notes)
+
+    def test_a_configured_origin_uses_its_own_rate_without_a_note(self, cfg):
+        from nippon_margin.config import OriginShipping
+
+        tuned = cfg.model_copy(deep=True)
+        tuned.costs.shipping.by_origin = {
+            "SOUTH KOREA": OriginShipping(roro_chf=2900.0, container_chf_per_car=2000.0)
+        }
+        b = compute_landed(tuned, price_usd=30_000, fx_usd_chf=0.80,
+                           mode=ShippingMode.RORO, origin="SOUTH KOREA")
+        assert b.freight_chf == 2900.0
+        assert not any("quoted for" in n for n in b.notes)
+
+    def test_the_assumed_origin_gets_no_warning(self, cfg):
+        b = compute_landed(cfg, price_usd=30_000, fx_usd_chf=0.80,
+                           mode=ShippingMode.RORO, origin="JAPAN")
+        assert not any("quoted for" in n for n in b.notes)
+
+    def test_origin_is_case_insensitive(self, cfg):
+        a = compute_landed(cfg, price_usd=30_000, fx_usd_chf=0.80,
+                           mode=ShippingMode.RORO, origin="japan")
+        assert not any("quoted for" in n for n in a.notes)

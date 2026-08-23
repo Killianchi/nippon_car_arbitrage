@@ -24,15 +24,25 @@ costs:
     roro_chf: 3500.0
     container_chf_per_car: 2400.0
     container_cars_per_load: 3
+    # Japanese exporters sell plenty of stock that is not in Japan: SBT lists
+    # 48 of 50 of its LHD Porsches in Incheon, South Korea. The rates above
+    # were quoted for Japan, so anything shipping from elsewhere is costed on
+    # the wrong basis until you add a real quote here. Listings from an
+    # unconfigured origin are flagged rather than silently mispriced.
+    by_origin: {}
+      # "SOUTH KOREA":
+      #   roro_chf: 0
+      #   container_chf_per_car: 0
 
   # Marine insurance as a % of (FOB + freight). Default 0 so the headline
   # numbers match a plain FOB+freight CIF. Set to e.g. 0.005 if your forwarder
   # charges it.
   marine_insurance_pct: 0.0
 
-  # Japan-Switzerland FTA: passenger cars enter duty-free, BUT only against a
-  # valid certificate of origin from the Japanese exporter. If you cannot get
-  # one, set this to the MFN rate you would actually pay.
+  # Customs duty. Modelled at 0%, which is what a Swiss forwarder will most
+  # likely quote you for a car -- but CONFIRM IT, and confirm it for the
+  # country the car actually ships from, which is not always Japan. Leave the
+  # flag on to keep that note attached to every cost breakdown.
   customs_duty_pct: 0.0
   customs_duty_requires_certificate_of_origin: true
 
@@ -141,6 +151,10 @@ scoring:
 
 # --- Risk ------------------------------------------------------------------
 risk:
+  # The country the cost assumptions above were quoted for. Listings from
+  # anywhere else are flagged, and lose the Japanese auction grade as a
+  # condition signal.
+  assumed_origin: JAPAN
   min_auction_grade: 4.0
   penalise_rhd: true
   # Drop right-hand-drive stock outright rather than just flagging it: a Swiss

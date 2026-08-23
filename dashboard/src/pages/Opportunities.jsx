@@ -239,7 +239,10 @@ function Detail({ o }) {
           <img src={o.image_urls[0]} alt="" loading="lazy"
                className="w-full rounded-lg border border-edge object-cover" />
         )}
-        <p className="text-sm text-neutral-400">{km(o.mileage_km)}</p>
+        <p className="text-sm text-neutral-400">
+          {km(o.mileage_km)}
+          {o.location && <> · <span className="text-warn">{o.location}</span></>}
+        </p>
         {(o.risk_flags || []).length > 0 && (
           <ul className="space-y-1 text-xs text-warn">
             {o.risk_flags.map((f) => <li key={f}>⚠ {f}</li>)}

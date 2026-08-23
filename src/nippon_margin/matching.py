@@ -358,6 +358,19 @@ def risk_flags(cfg: Config, jp: JpListing, stats: CompStats) -> list[str]:
     if jp.repair_history:
         flags.append("Repair history declared")
 
+    origin = jp.origin_country
+    if origin and origin != cfg.risk.assumed_origin:
+        _, _, using_default = cfg.costs.shipping.for_origin(origin)
+        detail = "freight, paperwork and export rules all differ"
+        if using_default:
+            detail += f"; freight is still the {cfg.risk.assumed_origin} figure"
+        flags.append(f"Car is in {jp.location or origin}, not {cfg.risk.assumed_origin} -- {detail}")
+        if jp.auction_grade is None:
+            flags.append(
+                f"No Japanese auction grade -- {origin} stock is not graded that way, "
+                "so condition is unverified"
+            )
+
     if stats.comp_count < cfg.matching.min_comps_for_confidence:
         flags.append(f"Thin comp set ({stats.comp_count}) -- price estimate is weak")
 
@@ -442,6 +455,7 @@ def build_opportunity(
         fx_usd_chf=fx_usd_chf,
         price_terms=terms,
         watchlist_key=jp.watchlist_key,
+        origin=jp.origin_country,
     )
     # The RoRo figure is the headline: it is what a single car actually costs
     # today, without waiting for two more cars to fill a container.
@@ -487,6 +501,7 @@ def build_opportunity(
         variant=jp.variant or (mapped.variant if mapped else None),
         year=jp.year,
         mileage_km=jp.mileage_km,
+        location=jp.location,
         url=jp.url,
         image_urls=jp.image_urls[:6],
         price_usd=jp.price_usd,
