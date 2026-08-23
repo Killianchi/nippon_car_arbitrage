@@ -80,7 +80,7 @@ publishes a total price, and we use theirs rather than guessing.
 python3.12 -m venv .venv && source .venv/bin/activate
 pip install -e '.[dev]'
 
-nippon-margin backfill --days 180   # ECB FX history
+nippon-margin backfill --days 180   # ECB FX history (the daily run does this too)
 nippon-margin scrape                # ~90s across four sources
 nippon-margin analyze
 nippon-margin report --markdown
@@ -103,7 +103,7 @@ cd dashboard && npm install && npm run dev
 | `analyze` | price each Japanese car against the Swiss pool, rank, write daily model stats |
 | `report` | daily digest as Markdown (stdout) and/or HTML (`--out out/digest.html`) |
 | `alert` | Telegram/email for whatever crossed a threshold (`--dry-run` to preview) |
-| `backfill` | seed ECB FX history so the charts have a curve on day one |
+| `backfill` | seed ECB FX history; idempotent, so the daily run calls it too |
 | `export` | write the static JSON snapshot the dashboard reads |
 | `sync pull` / `sync push` | restore / persist the encrypted catalog on the `data` branch |
 | `doctor` | check config, credentials and catalog before a real run |

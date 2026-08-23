@@ -71,6 +71,15 @@ jobs:
           key: html-cache-${{ github.run_id }}
           restore-keys: html-cache-
 
+      - name: Backfill FX history
+        # One API call for the whole window, and `save_fx` is INSERT OR
+        # REPLACE, so running it every day is idempotent and costs nothing.
+        # Without it the FX charts stay a single point forever: the scrape
+        # only ever fetches today's rate, so history would take six months to
+        # accumulate on its own.
+        continue-on-error: true
+        run: nippon-margin backfill --days 180
+
       - name: Scrape
         run: |
           nippon-margin scrape \
