@@ -11,7 +11,14 @@ from pathlib import Path
 import pytest
 
 from nippon_margin.crypto import StateCryptoError
-from nippon_margin.statesync import DATA_BRANCH, STATE_FILE, SyncError, pull, push
+from nippon_margin.statesync import (
+    DATA_BRANCH,
+    STATE_FILE_ENCRYPTED,
+    STATE_FILE_PLAIN,
+    SyncError,
+    pull,
+    push,
+)
 
 KEY = "test-key-that-is-long-enough-1234"
 
@@ -88,7 +95,7 @@ class TestSecrecy:
         checkout = tmp_path / "peek"
         git("clone", "--quiet", "--branch", DATA_BRANCH,
             str(tmp_path / "origin.git"), str(checkout))
-        blob = (checkout / STATE_FILE).read_bytes()
+        blob = (checkout / STATE_FILE_ENCRYPTED).read_bytes()
         assert b"Porsche" not in blob
         assert b"20891" not in blob
         assert blob.startswith(b"NMSTATE1")
@@ -123,11 +130,6 @@ class TestFailureModes:
             pull(db, repo=repo)
         # The catalog must not be silently replaced by an empty one.
         assert not db.exists()
-
-    def test_a_missing_key_raises(self, repo, monkeypatch):
-        monkeypatch.delenv("DATA_ENCRYPTION_KEY", raising=False)
-        with pytest.raises(StateCryptoError, match="not set"):
-            pull(repo / "data" / "nippon.db", repo=repo)
 
     def test_pushing_a_missing_file_raises(self, repo):
         with pytest.raises(SyncError, match="does not exist"):
@@ -203,3 +205,106 @@ class TestCredentialHandling:
         with pytest.raises(SyncError) as exc:
             push(db, repo=repo)
         assert "ghs_supersecret" not in str(exc.value)
+
+
+class TestUnencryptedMode:
+    """No key set is a supported choice, not a degraded one.
+
+    Encryption here buys privacy and nothing else — git already
+    content-addresses blobs — so the default has to work without a secret.
+    """
+
+    @pytest.fixture
+    def plain_repo(self, repo, monkeypatch):
+        monkeypatch.delenv("DATA_ENCRYPTION_KEY", raising=False)
+        return repo
+
+    def test_round_trips_without_a_key(self, plain_repo):
+        db = make_db(plain_repo / "data" / "nippon.db", b"SQLite format 3\x00plain")
+        assert push(db, repo=plain_repo) is True
+        db.unlink()
+        assert pull(db, repo=plain_repo) is True
+        assert db.read_bytes() == b"SQLite format 3\x00plain"
+
+    def test_the_filename_says_which_format_is_in_use(self, plain_repo, tmp_path):
+        push(make_db(plain_repo / "data" / "nippon.db"), repo=plain_repo)
+        checkout = tmp_path / "peek"
+        git("clone", "--quiet", "--branch", DATA_BRANCH,
+            str(tmp_path / "origin.git"), str(checkout))
+        assert (checkout / STATE_FILE_PLAIN).exists()
+        assert not (checkout / STATE_FILE_ENCRYPTED).exists()
+
+    def test_the_blob_is_readable_with_plain_gunzip(self, plain_repo, tmp_path):
+        """The whole point of the default: no tooling needed to inspect it."""
+        import gzip
+
+        make_db(plain_repo / "data" / "nippon.db", b"SQLite format 3\x00readable")
+        push(plain_repo / "data" / "nippon.db", repo=plain_repo)
+        checkout = tmp_path / "peek"
+        git("clone", "--quiet", "--branch", DATA_BRANCH,
+            str(tmp_path / "origin.git"), str(checkout))
+        blob = (checkout / STATE_FILE_PLAIN).read_bytes()
+        assert gzip.decompress(blob[8:]) == b"SQLite format 3\x00readable"
+
+    def test_the_branch_readme_explains_the_manual_route(self, plain_repo, tmp_path):
+        push(make_db(plain_repo / "data" / "nippon.db"), repo=plain_repo)
+        checkout = tmp_path / "peek"
+        git("clone", "--quiet", "--branch", DATA_BRANCH,
+            str(tmp_path / "origin.git"), str(checkout))
+        readme = (checkout / "README.md").read_text()
+        assert "gunzip" in readme
+
+
+class TestSwitchingModes:
+    """Turning encryption on or off must never need a migration."""
+
+    def test_plain_then_encrypted(self, repo, monkeypatch, tmp_path):
+        db = repo / "data" / "nippon.db"
+
+        monkeypatch.delenv("DATA_ENCRYPTION_KEY", raising=False)
+        make_db(db, b"written in the clear")
+        push(db, repo=repo)
+
+        # Key appears; the next push upgrades and the old file is gone.
+        monkeypatch.setenv("DATA_ENCRYPTION_KEY", KEY)
+        push(db, repo=repo)
+        db.unlink()
+        assert pull(db, repo=repo) is True
+        assert db.read_bytes() == b"written in the clear"
+
+        checkout = tmp_path / "peek"
+        git("clone", "--quiet", "--branch", DATA_BRANCH,
+            str(tmp_path / "origin.git"), str(checkout))
+        assert (checkout / STATE_FILE_ENCRYPTED).exists()
+        assert not (checkout / STATE_FILE_PLAIN).exists()
+
+    def test_encrypted_then_plain(self, repo, monkeypatch):
+        db = repo / "data" / "nippon.db"
+
+        monkeypatch.setenv("DATA_ENCRYPTION_KEY", KEY)
+        make_db(db, b"written encrypted")
+        push(db, repo=repo)
+
+        monkeypatch.delenv("DATA_ENCRYPTION_KEY", raising=False)
+        push(db, repo=repo)
+        db.unlink()
+        assert pull(db, repo=repo) is True
+        assert db.read_bytes() == b"written encrypted"
+
+    def test_reading_an_encrypted_catalog_without_the_key_explains_itself(
+        self, repo, monkeypatch
+    ):
+        db = repo / "data" / "nippon.db"
+        monkeypatch.setenv("DATA_ENCRYPTION_KEY", KEY)
+        push(make_db(db), repo=repo)
+        db.unlink()
+
+        monkeypatch.delenv("DATA_ENCRYPTION_KEY", raising=False)
+        with pytest.raises(StateCryptoError, match="encrypted but DATA_ENCRYPTION_KEY is not set"):
+            pull(db, repo=repo)
+        assert not db.exists()
+
+    def test_a_weak_key_is_refused_rather_than_used(self, repo, monkeypatch):
+        monkeypatch.setenv("DATA_ENCRYPTION_KEY", "hunter2")
+        with pytest.raises(StateCryptoError, match="too short"):
+            push(make_db(repo / "data" / "nippon.db"), repo=repo)

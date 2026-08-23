@@ -15,15 +15,15 @@ Japanese exporters ─┐
                     ├─► catalog ─► landed cost ─► comps ─► score ─┬─► Telegram
 Swiss classifieds ──┘     ▲                                       └─► dashboard
                           │                                            ▲
-              encrypted SQLite on the `data` branch          static data.json
+                 SQLite on the `data` branch                static data.json
 ```
 
 **No database service, no cloud account for storage.** Actions runners are
-ephemeral, so the catalog lives in this repository: one SQLite file, gzipped
-and AES-256-GCM encrypted, force-pushed to an orphan `data` branch each run.
-The repo is public; the deal flow is not. The dashboard is a plain static
-site that reads a JSON snapshot the run exports — no client SDK, no per-read
-billing, and Cloudflare Access in front of it.
+ephemeral, so the catalog lives in this repository: one gzipped SQLite file,
+force-pushed to an orphan `data` branch each run. Set `DATA_ENCRYPTION_KEY`
+and it is AES-256-GCM encrypted instead — optional, and switching either way
+needs no migration. The dashboard is a plain static site that reads a JSON
+snapshot the run exports — no client SDK, no per-read billing.
 
 ---
 
@@ -123,12 +123,14 @@ wrangler login         # npm install -g wrangler
 ./scripts/setup.sh
 ```
 
-That script does everything that can be done from a terminal: it generates
-the catalog encryption key and stores it as a GitHub secret, prompts for the
-Telegram bot token and looks the chat id up for you, creates the Cloudflare
-Pages project, and configures the Cloudflare Access policy that keeps the
-dashboard private. Re-running it is safe — it never overwrites an existing
-secret, and never regenerates the encryption key.
+That script does everything that can be done from a terminal: it offers to
+encrypt the catalog, prompts for the Telegram bot token and looks the chat id
+up for you, creates the Cloudflare Pages project, and configures the
+Cloudflare Access policy. Re-running it is safe — it never overwrites an
+existing secret, and never regenerates the encryption key.
+
+The only genuinely required secrets are the two Telegram ones and the two
+Cloudflare ones. Everything else is optional.
 
 Then:
 
@@ -151,20 +153,30 @@ DATA_ENCRYPTION_KEY=... nippon-margin sync pull
 <details>
 <summary>The same steps, manually</summary>
 
-**1. Generate the catalog encryption key.** The catalog is committed to this
-**public** repository, so it is encrypted. Keep a copy somewhere safe — losing
-it does not break the scraper, but the stored catalog becomes unreadable and
-every `first_seen` date and price-history point goes with it.
+**1. Decide whether to encrypt the catalog (optional).** By default it is
+stored as plain gzip on the `data` branch — no secret to manage, readable with
+`gunzip` and `sqlite3`. Encrypting it buys privacy and nothing else here: git
+already content-addresses the blob, so integrity is free either way.
+
+Encrypt it if this repository is public and you would rather your margins and
+deal flow were not readable by anyone who clones it. Keep the key somewhere
+safe — losing it does not break the scraper, but the stored catalog becomes
+unreadable and every `first_seen` date and price-history point goes with it.
 
 ```bash
 python -c 'import secrets; print(secrets.token_urlsafe(32))'
 ```
 
+You can turn this on at any time: the blob declares its own format, so the
+next push upgrades and `sync pull` keeps reading whatever is there. Note that
+switching later does not retroactively hide what was already pushed — delete
+the `data` branch and let the next run recreate it if that matters.
+
 **2. Add the GitHub secrets.** Settings → Secrets and variables → Actions.
 
 | name | value |
 |---|---|
-| `DATA_ENCRYPTION_KEY` | the key you just generated |
+| `DATA_ENCRYPTION_KEY` | *optional* — set it only if you want the catalog encrypted |
 | `TELEGRAM_BOT_TOKEN` | from [@BotFather](https://t.me/BotFather) → `/newbot` |
 | `TELEGRAM_CHAT_ID` | message your bot, then open `https://api.telegram.org/bot<TOKEN>/getUpdates` and read `result[0].message.chat.id` |
 | `CLOUDFLARE_API_TOKEN` | My Profile → API Tokens → Create Token → **Cloudflare Pages: Edit** |
@@ -358,13 +370,12 @@ Today: a 2.8 MB catalog compresses to a ~250 KB encrypted blob.
 
 ## Security posture
 
-This repository is public; the data is not.
-
-- The catalog on the `data` branch is AES-256-GCM encrypted with a key that
-  only exists as a GitHub secret. Fresh salt and nonce per write, so two
-  commits of identical data differ — git history leaks nothing about how much
-  changed day to day. Tampering fails the auth tag rather than decrypting to
-  garbage.
+- The catalog on the `data` branch is plain gzip by default. Set
+  `DATA_ENCRYPTION_KEY` and it becomes AES-256-GCM with a fresh salt and
+  nonce per write, so two commits of identical data differ and the history
+  leaks nothing about how much changed day to day; tampering then fails the
+  auth tag rather than decrypting to garbage. Either way the blob declares
+  its own format, so switching needs no migration.
 - `dashboard/public/data.json` is the whole catalog in plaintext and is
   **gitignored**. It is generated at build time and only ever served from
   behind Cloudflare Access.
@@ -418,7 +429,7 @@ src/nippon_margin/
   fx.py                      ECB rates + margin impact
   parse.py                   text → numbers, shared by all adapters
   http.py                    throttle, robots, cache, Playwright
-  crypto.py                  AES-256-GCM for the committed catalog
+  crypto.py                  gzip, or AES-256-GCM when a key is set
   statesync.py               pull/push the catalog on the `data` branch
   adapters/                  base + registry + per-source modules
   pipeline/                  scrape → analyze → report → alert → export
@@ -446,6 +457,6 @@ tests/fixtures/              frozen captures of real listing pages
 - **The dashboard is as fresh as the last run**, not live. The header shows
   the snapshot age and turns amber past 36 hours, which is the signal that the
   daily workflow has stopped working.
-- **Losing `DATA_ENCRYPTION_KEY` loses the catalog history.** The scraper
-  rebuilds from scratch, but `first_seen` dates and price history do not come
-  back. Keep a copy outside GitHub.
+- **If you do encrypt, losing `DATA_ENCRYPTION_KEY` loses the catalog
+  history.** The scraper rebuilds from scratch, but `first_seen` dates and
+  price history do not come back. Keep a copy outside GitHub.
