@@ -15,7 +15,7 @@ from .models import PriceTerms, Steering
 
 __all__ = [
     "text_of", "to_int", "to_float", "parse_price", "parse_mileage",
-    "parse_year", "parse_month", "parse_engine_cc", "parse_grade",
+    "parse_year", "parse_month", "parse_engine_cc", "parse_grade", "GRADE_S",
     "parse_steering", "parse_price_terms", "parse_transmission",
     "parse_repair_history", "parse_chassis", "split_make_model",
 ]
@@ -154,8 +154,14 @@ def parse_engine_cc(raw: str | None) -> int | None:
     return None
 
 
+# The Japanese auction condition scale runs S > 6 > 5 > 4.5 > 4 > ... > 1, with
+# R/RA for accident-repaired cars. S ("as new") sits above 6, so it needs a value
+# of its own rather than being folded into 6.
+GRADE_S = 6.5
+
+
 def parse_grade(raw: str | None) -> float | None:
-    """Japanese auction grade: 5, 4.5, 4, 3.5, R/RA (accident repaired)."""
+    """Japanese auction grade: S, 6, 5, 4.5, 4, 3.5, R/RA (accident repaired)."""
     if not raw:
         return None
     text = text_of(raw).upper()
@@ -163,7 +169,7 @@ def parse_grade(raw: str | None) -> float | None:
         return 0.0  # graded R = repaired; treat as the worst possible grade
     m = re.search(r"\b([0-6](?:\.5)?)\b", text)
     if not m:
-        return None
+        return GRADE_S if re.search(r"\bS\b", text) else None
     g = float(m.group(1))
     return g if 0 <= g <= 6 else None
 
