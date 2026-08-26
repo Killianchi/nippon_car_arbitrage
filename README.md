@@ -69,8 +69,12 @@ Every franc between the Japanese ask and a car on Swiss plates:
 Calibration case, pinned by a test: a G 63 at **$132,567 FOB** with USD/CHF at
 0.80 lands at **CHF 125,965** (RoRo).
 
-A C&F or CIF quote never gets our freight assumption added on top — SBT Japan
-publishes a total price, and we use theirs rather than guessing.
+A C&F or CIF quote never gets our freight assumption added on top. Sources
+that label their price get taken at their word: goo-net-exchange captions
+its figure `Car Price (FOB)`. SBT's "Total Price" is *not* a C&F quote — it
+runs a flat USD 1,713–1,868 above the vehicle price from a $25k car to a
+$336k one, which is a documentation fee, not ocean freight — so it is read
+as FOB and our own freight is added.
 
 ---
 
@@ -216,37 +220,72 @@ nothing in a browser can quietly change a tax rate.
 Per-model overrides live on each watchlist entry:
 
 ```yaml
-- key: porsche_911
+- key: porsche_911_carrera_s
   make: Porsche
-  model: "911"
-  aliases: ["996", "997", "991", "Carrera", "Turbo S", "GT3"]
-  model_codes: ["997M9701", "996", "991"]
-  body: coupe
+  model: "911 Carrera S"
+  aliases: ["Carrera S", "Carrera 4S", "Carrera GTS", "Targa 4S"]
+  model_codes: ["991MA103", "997MA101", "997M9701"]
+  ch_model_slug: "911"              # AutoUncle files every tier under /911
+  goonet_path: "PORSCHE/911"        # so does goo-net-exchange
+  year_min: 1998
+  year_max: 2019                    # 996-991; the 992 is a different car
   max_km: 120000
   min_grade: 4.0
   homologation_mfk_chf: 2500        # 911s cost more to put through the MFK
   risk_notes:
     - "997.1: bore scoring inspection mandatory before bidding"
-    - "996: IMS bearing history required"
 ```
 
 `model_code_map` bridges the two sides of the trade: Japanese exporters list
 `463276`, Swiss sites list `G 63 AMG`. Without that table, comp matching finds
 almost nothing.
 
+### Price tiers
+
+A model name can cover several cars at wildly different money. Swiss comps for
+a 2011+ Porsche 911 run from CHF 63,900 to CHF 152,888; pooled, p25 is a blend
+of Carrera, GTS, Turbo and GT3, and every car in the pool is mispriced — a base
+Carrera inherits a GT3's margin, a Turbo inherits a Carrera's loss.
+
+So the 911 is four watchlist entries, one per price band the Swiss market
+actually trades in (2011+ medians: Carrera 76.5k, S/GTS 87.4k, Turbo 115.7k,
+GT3 148.9k). Both sides resolve into them: Swiss listings by their `variant`
+field, Japanese ones by the katashiki (型式), which pins the engine —
+`991MA104` is the 3,436cc base, `991MA103` the 3,799cc S. Those codes were
+read off the Japanese type catalogue rather than inferred.
+
+Two rules make it hold together:
+
+* **A trim alias outranks a model name.** `Porsche 911` is longer than
+  `Carrera 4S` and says nothing about which 911 it is, so length alone cannot
+  rank the two.
+* **An unknown tier is priced as the cheapest thing it could be.** 991H1 and
+  991J1 span Carrera through GTS on a single 2,981cc code, so they carry no
+  tier information. They fall to a catch-all whose `comps_from` points at the
+  base Carrera pool, and they carry a flag saying so.
+
+`comps_from` is general: any entry that exists because a tier could *not* be
+established should borrow the conservative pool rather than the whole one.
+
 ---
 
 ## Sources
 
-**Japan (buy side)** — four hand-written adapters, each verified against a
+**Japan (buy side)** — five hand-written adapters, each verified against a
 frozen capture of the real page in `tests/fixtures/`:
 
 | source | how |
 |---|---|
+| `goo-net-exchange.com` | the strongest of the five: names the **trim** on the card (`911 CARRERA 4S`) and captions its price `Car Price (FOB)` in both JPY and USD. Pages on `index-N.html`, not `?page=N` |
 | `exportfrom.jp` | static grid + a labelled spec table on the detail page |
 | `carused.jp` | parses the Next.js RSC payload rather than the DOM, which yields typed `model_code` / `grade` / `odometer` / `steering` over plain HTTP |
 | `beforward.jp` | scrapes the make → numeric-id table at run time, then walks per-make stock lists |
-| `sbtjapan.com` | same, plus it publishes a **total (C&F) price**, so we use their freight number instead of our estimate |
+| `sbtjapan.com` | same, plus a katashiki (型式) on ~2/3 of cars, which pins the engine and therefore the trim tier |
+
+Why the trim matters: outside goo-net, roughly 2% of Japanese listings name
+one. A Porsche 911 is five different cars in one model name, so an unnamed
+trim gets priced against whatever 911s the Swiss pool happens to hold — see
+*Price tiers* below.
 
 `japan-partner`, `tokyocarz`, `japanesecartrade` and `ts-export` ship as
 declarative specs (`src/nippon_margin/adapters/specs.py`), disabled by

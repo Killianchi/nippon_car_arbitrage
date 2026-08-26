@@ -255,6 +255,9 @@ sources:
     carused:         { enabled: true,  max_pages: 3,  renderer: "playwright" }
     beforward:       { enabled: true,  max_pages: 3,  renderer: "http" }
     sbtjapan:        { enabled: true,  max_pages: 3,  renderer: "http" }
+    # The only source that names the trim on the card, and the only one that
+    # labels its price "Car Price (FOB)" instead of leaving us to guess.
+    goonet:          { enabled: true,  max_pages: 5,  renderer: "http" }
     japanpartner:    { enabled: false, max_pages: 2,  renderer: "http" }
     tokyocarz:       { enabled: false, max_pages: 2,  renderer: "http" }
     japanesecartrade: { enabled: false, max_pages: 2,  renderer: "http" }
@@ -280,6 +283,7 @@ sources:
 # `model_codes` feed the JP model_code -> CH variant mapping table.
 watchlist:
   - key: mercedes_g_class
+    goonet_path: "MERCEDES_BENZ/G-CLASS"
     make: Mercedes-Benz
     model: G-Class
     aliases: ["G-Klasse", "Geländewagen", "G63", "G 63", "G500", "G 500", "W463", "AMG G"]
@@ -311,6 +315,7 @@ watchlist:
   # 991H1/991J1 (the 2,981cc 991.2) span Carrera through GTS on one code and
   # so cannot be tiered -- they stay in the catch-all below.
   - key: porsche_911_carrera
+    goonet_path: "PORSCHE/911"
     make: Porsche
     model: "911 Carrera"
     aliases: ["Carrera", "Carrera 4", "Targa 4", "Carrera Cabriolet", "Carrera 4 Cabriolet"]
@@ -327,6 +332,7 @@ watchlist:
       - "996: IMS bearing history required"
 
   - key: porsche_911_carrera_s
+    goonet_path: "PORSCHE/911"
     make: Porsche
     model: "911 Carrera S"
     # S, 4S and GTS share a katashiki and trade within ~7% of each other in
@@ -354,6 +360,7 @@ watchlist:
       - "997.1: bore scoring inspection mandatory before bidding"
 
   - key: porsche_911_turbo
+    goonet_path: "PORSCHE/911"
     make: Porsche
     model: "911 Turbo"
     aliases: ["Turbo", "Turbo S", "Turbo Cabriolet", "Turbo S Cabriolet"]
@@ -369,6 +376,7 @@ watchlist:
       - "Turbo and Turbo S are a CHF 25k spread; confirm which before bidding"
 
   - key: porsche_911_gt
+    goonet_path: "PORSCHE/911"
     make: Porsche
     model: "911 GT3"
     aliases: ["GT3", "GT3 RS", "GT2", "GT2 RS", "911 R", "Speedster"]
@@ -389,6 +397,7 @@ watchlist:
   # Carrera pool, because an unknown 911 is worth the cheapest thing it could
   # be -- see `comps_from`.
   - key: porsche_911
+    goonet_path: "PORSCHE/911"
     make: Porsche
     model: "911"
     aliases: []
@@ -406,6 +415,7 @@ watchlist:
       - "997.1: bore scoring inspection mandatory before bidding"
 
   - key: porsche_cayenne
+    goonet_path: "PORSCHE/CAYENNE"
     make: Porsche
     model: Cayenne
     aliases: ["Cayenne S", "Cayenne Turbo", "958", "957"]
@@ -415,6 +425,7 @@ watchlist:
     min_grade: 3.5
 
   - key: porsche_macan
+    goonet_path: "PORSCHE/MACAN"
     make: Porsche
     model: Macan
     aliases: ["Macan S", "Macan GTS", "95B"]
@@ -424,6 +435,7 @@ watchlist:
     min_grade: 4.0
 
   - key: bmw_m3_e92
+    goonet_path: "BMW/M3"
     make: BMW
     model: M3
     aliases: ["E92", "E90 M3", "E93", "S65"]
@@ -437,6 +449,7 @@ watchlist:
     risk_notes: ["S65 V8: rod bearing replacement history required"]
 
   - key: bmw_850i_e31
+    goonet_path: "BMW/8_SERIES"
     make: BMW
     model: 850i
     aliases: ["E31", "850Ci", "8 Series", "840Ci"]
@@ -452,6 +465,7 @@ watchlist:
     risk_notes: ["E31: wiring loom and hydraulic ABS costs are brutal; budget extra"]
 
   - key: abarth_695
+    goonet_path: "ABARTH/ABARTH_695"
     make: Abarth
     model: "695"
     aliases: ["695 Biposto", "695 Tributo", "500 Abarth", "695 Rivale"]
@@ -462,6 +476,7 @@ watchlist:
     min_grade: 4.0
 
   - key: mercedes_sl
+    goonet_path: "MERCEDES_BENZ/SL"
     make: Mercedes-Benz
     model: SL
     aliases: ["R129", "R230", "SL500", "SL 500", "SL55", "SL 55 AMG", "SL600"]
@@ -476,6 +491,7 @@ watchlist:
     min_grade: 3.5
 
   - key: mercedes_c63_w204
+    goonet_path: "MERCEDES_BENZ/C-CLASS"
     make: Mercedes-Benz
     model: C63 AMG
     aliases: ["W204", "C 63 AMG", "C63", "Black Series"]
@@ -488,6 +504,7 @@ watchlist:
     risk_notes: ["M156: head bolt and cam lobe wear -- ask for service records"]
 
   - key: maserati_granturismo
+    goonet_path: "MASERATI/GRAN_TURISMO"
     make: Maserati
     model: GranTurismo
     aliases: ["GranSport", "Gran Turismo", "GranTurismo S", "MC Stradale"]
@@ -499,6 +516,7 @@ watchlist:
     min_grade: 4.0
 
   - key: alfa_giulia_qv
+    goonet_path: "ALFA_ROMEO/GIULIA"
     make: Alfa Romeo
     model: Giulia Quadrifoglio
     aliases: ["Giulia QV", "Quadrifoglio", "952"]

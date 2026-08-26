@@ -241,6 +241,9 @@ class WatchItem(Base):
     #: AutoUncle/Autolina URL slug when it differs from `model`
     #: (their SL lives at `mercedes-benz/sl-class`, not `.../sl`).
     ch_model_slug: str | None = None
+    #: `MAKE/MODEL` path on goo-net-exchange.com, whose slugs follow their own
+    #: convention (`MERCEDES_BENZ/G-CLASS`, `MASERATI/GRAN_TURISMO`).
+    goonet_path: str | None = None
     #: Draw Swiss comps from another watchlist entry's pool instead of this
     #: one's. For entries that exist because a tier could *not* be
     #: established: an unknown 911 is priced against base Carreras, the

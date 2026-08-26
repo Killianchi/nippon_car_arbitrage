@@ -18,8 +18,9 @@ import pytest
 from nippon_margin.adapters.ch.autouncle import AutoUncleAdapter
 from nippon_margin.adapters.jp.carused import CarusedAdapter, extract_records
 from nippon_margin.adapters.jp.exportfrom import ExportFromAdapter, _spec_table
+from nippon_margin.adapters.jp.goonet import GooNetAdapter, _pretty, _variant
 from nippon_margin.config import SourceConfig
-from nippon_margin.models import Steering
+from nippon_margin.models import PriceTerms, Steering
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -278,3 +279,94 @@ class TestSbtPriceTerms:
         ad = SbtJapanAdapter(cfg, SourceConfig(enabled=True, max_pages=1), fetcher=None)
         listing = ad._parse_card(HTMLParser(html).css_first(".card-product"))
         assert listing.price_usd == 25_340
+
+
+class TestGooNet:
+    """The only Japanese source that names the trim and labels its price FOB."""
+
+    @pytest.fixture(scope="class")
+    def listings(self, cfg):
+        return adapter(GooNetAdapter, cfg).parse_page(fixture("goonet"), "x")
+
+    def test_finds_the_whole_grid(self, listings):
+        assert len(listings) >= 15
+
+    def test_every_listing_has_the_essentials(self, listings):
+        for lst in listings:
+            assert lst.source == "goonet"
+            assert lst.source_ref.isdigit()
+            assert lst.make and lst.model
+            assert lst.url.startswith("https://www.goo-net-exchange.com/usedcars/")
+
+    def test_the_trim_is_named_on_almost_every_card(self, listings):
+        """This is the whole reason for the source: elsewhere ~2% of Japanese
+        listings state a trim, and a Carrera gets priced against a GT3."""
+        named = [x for x in listings if x.variant]
+        assert len(named) >= int(0.8 * len(listings))
+        assert {"Carrera", "Carrera S", "Carrera 4S"} <= {x.variant for x in named}
+
+    def test_trims_route_to_their_price_tier(self, listings):
+        by_variant = {x.variant: x.watchlist_key for x in listings if x.watchlist_key}
+        assert by_variant.get("Carrera") == "porsche_911_carrera"
+        assert by_variant.get("Carrera S") == "porsche_911_carrera_s"
+        assert by_variant.get("Carrera 4S") == "porsche_911_carrera_s"
+        assert by_variant.get("Turbo S") == "porsche_911_turbo"
+
+    def test_prices_are_fob_usd(self, listings):
+        priced = [x for x in listings if x.price_usd]
+        assert len(priced) >= 15
+        assert all(1_000 < x.price_usd < 2_000_000 for x in priced)
+        # The card caption is literally "Car Price (FOB)" -- no guessing, and
+        # no repeat of reading a bundled total as a shipping-inclusive quote.
+        assert all(x.price_terms is PriceTerms.FOB for x in priced)
+
+    def test_the_spec_strip_is_read(self, listings):
+        assert sum(1 for x in listings if x.year) >= 15
+        assert sum(1 for x in listings if x.reg_month) >= 15
+        assert sum(1 for x in listings if x.mileage_km) >= 15
+        assert sum(1 for x in listings if x.engine_cc) >= 15
+        assert sum(1 for x in listings if x.steering is not Steering.UNKNOWN) >= 15
+
+    def test_both_steering_sides_are_present_and_told_apart(self, listings):
+        """Japan holds a lot of imported LHD European metal; roughly half of
+        this page is LHD. Reading them all as RHD would discard the source."""
+        sides = {x.steering for x in listings}
+        assert Steering.LHD in sides
+        assert Steering.RHD in sides
+
+    def test_location_is_a_japanese_prefecture(self, listings):
+        located = [x.location for x in listings if x.location]
+        assert len(located) >= 15
+        assert all(loc.endswith("Japan") for loc in located)
+
+    def test_out_of_generation_cars_are_not_keyed(self, cfg, listings):
+        for lst in listings:
+            if lst.watchlist_key:
+                assert cfg.watch_item(lst.watchlist_key).year_ok(lst.year)
+
+    def test_search_urls_visit_each_model_page_once(self, cfg):
+        urls = list(adapter(GooNetAdapter, cfg).search_urls())
+        assert len(urls) == len(set(urls)), "the five 911 tiers share one page"
+        assert "https://www.goo-net-exchange.com/usedcars/PORSCHE/911/index.html" in urls
+
+    def test_paging_is_a_path_not_a_query(self, cfg):
+        """`?page=2` returns HTTP 500; the site pages on `index-N.html`."""
+        cls = GooNetAdapter
+        urls = list(cls(cfg, SourceConfig(enabled=True, max_pages=3), fetcher=None).search_urls())
+        assert any(u.endswith("/PORSCHE/911/index-2.html") for u in urls)
+        assert not any("?" in u for u in urls)
+
+
+class TestGooNetTitleParsing:
+    def test_acronyms_survive_the_shouting(self):
+        assert _pretty("911 CARRERA 4 GTS") == "911 Carrera 4 GTS"
+        assert _pretty("911 GT3 RS") == "911 GT3 RS"
+        assert _pretty("911 CARRERA 4S CABRIOLET") == "911 Carrera 4S Cabriolet"
+
+    def test_the_model_is_stripped_off_the_grade(self):
+        """`911 Carrera` is not a trim; `Carrera` is."""
+        assert _variant("911", "911 CARRERA 4S") == "Carrera 4S"
+        assert _variant("911", "911 TURBO S") == "Turbo S"
+
+    def test_a_grade_that_is_only_the_model_yields_no_trim(self):
+        assert _variant("911", "911") is None

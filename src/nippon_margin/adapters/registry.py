@@ -18,6 +18,7 @@ from .declarative import DeclarativeChAdapter, DeclarativeJpAdapter
 from .jp.beforward import BeForwardAdapter
 from .jp.carused import CarusedAdapter
 from .jp.exportfrom import ExportFromAdapter
+from .jp.goonet import GooNetAdapter
 from .jp.sbtjapan import SbtJapanAdapter
 from .specs import CH_SPECS, JP_SPECS
 
@@ -29,6 +30,7 @@ JP_ADAPTERS = {
     "carused": CarusedAdapter,
     "beforward": BeForwardAdapter,
     "sbtjapan": SbtJapanAdapter,
+    "goonet": GooNetAdapter,
 }
 CH_ADAPTERS = {
     "autouncle": AutoUncleAdapter,
