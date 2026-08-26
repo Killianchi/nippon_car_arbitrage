@@ -6,6 +6,7 @@ import pytest
 
 from nippon_margin.matching import (
     build_opportunity,
+    comp_pool_key,
     comp_stats,
     find_comps,
     liquidity_score,
@@ -696,3 +697,52 @@ class TestPriceTiers:
             url="https://example.test/g", watchlist_key="porsche_911_gt",
         )
         assert find_comps(cfg, jp, [gt3]) == []
+
+
+class TestCompsFromIsOneDirectional:
+    """`comps_from` says which pool a Japanese car borrows. It must never
+    reclassify a Swiss car.
+
+    The bug it fixes shipped: applying the redirect to both sides meant a
+    Swiss listing still keyed to the catch-all resolved to the base Carrera
+    pool, so a CHF 148,900 GT3 became the sole comp for a 2016 SBT car and
+    the dashboard showed a 107.5% margin.
+    """
+
+    @staticmethod
+    def _jp(key: str) -> JpListing:
+        return JpListing(
+            source="sbtjapan", source_ref="x", make="Porsche", model="911",
+            year=2016, mileage_km=25_861, price_usd=65_840,
+            steering=Steering.LHD, url="https://example.test/x",
+            watchlist_key=key,
+        )
+
+    @staticmethod
+    def _ch(ref: str, variant: str, price: float, key: str | None) -> ChListing:
+        return ChListing(
+            source="autouncle", source_ref=ref, make="Porsche", model="911",
+            variant=variant, year=2017, mileage_km=25_000, price_chf=price,
+            url=f"https://example.test/{ref}", watchlist_key=key,
+        )
+
+    def test_a_stale_catch_all_gt3_is_not_a_base_carrera_comp(self, cfg):
+        """A Swiss car keyed to the catch-all is one whose tier we could not
+        establish -- not evidence that it is a base Carrera."""
+        gt3 = self._ch("gt3", "GT3", 148_900, "porsche_911")
+        assert find_comps(cfg, self._jp("porsche_911"), [gt3]) == []
+
+    def test_the_redirect_still_reaches_the_base_pool(self, cfg):
+        carrera = self._ch("c", "Carrera", 84_980, "porsche_911_carrera")
+        comps = find_comps(cfg, self._jp("porsche_911"), [carrera])
+        assert [c.source_ref for c in comps] == ["c"]
+
+    def test_a_real_tier_does_not_borrow_the_catch_alls_leftovers(self, cfg):
+        stale = self._ch("s", "GT3", 148_900, "porsche_911")
+        assert find_comps(cfg, self._jp("porsche_911_carrera"), [stale]) == []
+
+    def test_comp_pool_key_redirects_only_where_declared(self, cfg):
+        assert comp_pool_key(cfg, "porsche_911") == "porsche_911_carrera"
+        assert comp_pool_key(cfg, "porsche_911_carrera") == "porsche_911_carrera"
+        assert comp_pool_key(cfg, "porsche_911_gt") == "porsche_911_gt"
+        assert comp_pool_key(cfg, None) is None

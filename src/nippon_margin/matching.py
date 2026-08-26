@@ -37,6 +37,7 @@ __all__ = [
     "make_compatible",
     "extract_trim",
     "resolve_watchlist_key",
+    "comp_pool_key",
     "find_comps",
     "comp_stats",
     "liquidity_score",
@@ -192,11 +193,18 @@ def _trim_compatible(cfg: Config, jp: JpListing, ch: ChListing) -> bool:
     return jp_trim == ch_trim
 
 
-def _comp_key(cfg: Config, key: str | None) -> str | None:
-    """The pool a watchlist entry prices against -- itself, unless redirected.
+def comp_pool_key(cfg: Config, key: str | None) -> str | None:
+    """The Swiss pool a *Japanese* watchlist entry prices against.
 
-    One hop only: `comps_from` names a real tier, never another redirect, so
-    following it further would only invite a cycle.
+    Itself, unless the entry sets `comps_from`. One hop only: `comps_from`
+    names a real tier, never another redirect, so following it further would
+    only invite a cycle.
+
+    This is deliberately one-directional. Applying it to the Swiss side too
+    would reclassify Swiss cars: a Swiss 911 in the catch-all is one whose
+    tier we could not establish, and redirecting it into the base Carrera
+    pool asserts it *is* a base Carrera. That is how a CHF 148,900 GT3 ended
+    up as the sole comp for a 2016 SBT car and showed a 107.5% margin.
     """
     item = cfg.watch_item(key) if key else None
     return (item.comps_from or key) if item else key
@@ -221,7 +229,7 @@ def _same_model(cfg: Config, jp: JpListing, ch: ChListing) -> bool:
     make+model text overlap.
     """
     if jp.watchlist_key and ch.watchlist_key:
-        return _comp_key(cfg, jp.watchlist_key) == _comp_key(cfg, ch.watchlist_key)
+        return comp_pool_key(cfg, jp.watchlist_key) == ch.watchlist_key
 
     mapped = cfg.resolve_model_code(jp.model_code)
     if mapped:
