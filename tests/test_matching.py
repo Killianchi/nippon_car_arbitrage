@@ -83,7 +83,7 @@ class TestWatchlistResolution:
         assert resolve_watchlist_key(cfg, make="", model="", model_code="463276") == "mercedes_g_class"
 
     def test_alias_in_title(self, cfg):
-        assert resolve_watchlist_key(cfg, make="Porsche", model="911 Carrera S") == "porsche_911"
+        assert resolve_watchlist_key(cfg, make="Porsche", model="911 Carrera S") == "porsche_911_carrera_s"
 
     def test_german_alias(self, cfg):
         assert resolve_watchlist_key(cfg, make="Mercedes-Benz", model="G-Klasse") == "mercedes_g_class"
@@ -95,7 +95,7 @@ class TestWatchlistResolution:
         key = resolve_watchlist_key(
             cfg, make="Porsche", model="Coupe", description="Rare 997 Carrera S, full history"
         )
-        assert key == "porsche_911"
+        assert key == "porsche_911_carrera_s"
 
 
 class TestFindComps:
@@ -460,7 +460,7 @@ class TestMakeAgreement:
         ) == "alfa_giulia_qv"
 
     def test_a_missing_make_does_not_block_a_match(self, cfg):
-        assert resolve_watchlist_key(cfg, make="", model="911 Carrera S") == "porsche_911"
+        assert resolve_watchlist_key(cfg, make="", model="911 Carrera S") == "porsche_911_carrera_s"
 
     def test_model_code_still_overrides_the_make_check(self, cfg):
         """Codes are authoritative; a mangled make string must not veto them."""
@@ -579,7 +579,7 @@ class TestGenerationBounds:
         assert resolve_watchlist_key(cfg, make="BMW", model="8 Series", year=2025) is None
 
     def test_the_911_window_excludes_the_992(self, cfg):
-        assert resolve_watchlist_key(cfg, make="Porsche", model="911 Carrera", year=2012) == "porsche_911"
+        assert resolve_watchlist_key(cfg, make="Porsche", model="911 Carrera", year=2012) == "porsche_911_carrera"
         assert resolve_watchlist_key(cfg, make="Porsche", model="911 Carrera", year=2022) is None
 
     def test_an_unknown_year_still_matches(self, cfg):
@@ -592,3 +592,107 @@ class TestGenerationBounds:
 
     def test_an_unbounded_entry_accepts_any_year(self, cfg):
         assert resolve_watchlist_key(cfg, make="Porsche", model="Cayenne", year=2024) == "porsche_cayenne"
+
+
+class TestPriceTiers:
+    """A 911 is five different cars in one model name.
+
+    Pooled, the Swiss comps for a 2011+ 911 run CHF 63,900 to CHF 152,888, so
+    a base Carrera priced against the pooled p25 shows a GT3's margin and a
+    Turbo shows a Carrera's loss. Each tier gets its own pool.
+    """
+
+    def test_the_swiss_variant_picks_the_tier(self, cfg):
+        cases = {
+            "Carrera": "porsche_911_carrera",
+            "Carrera 4": "porsche_911_carrera",
+            "Carrera S": "porsche_911_carrera_s",
+            "Carrera 4S": "porsche_911_carrera_s",
+            "Carrera GTS": "porsche_911_carrera_s",
+            "Carrera 4 GTS": "porsche_911_carrera_s",
+            "Turbo": "porsche_911_turbo",
+            "Turbo S": "porsche_911_turbo",
+            "GT3": "porsche_911_gt",
+            "GT3 RS": "porsche_911_gt",
+        }
+        for variant, expected in cases.items():
+            key = resolve_watchlist_key(
+                cfg, make="Porsche", model="911", variant=variant, year=2014
+            )
+            assert key == expected, f"{variant} -> {key}"
+
+    def test_a_trim_alias_outranks_a_longer_model_name(self, cfg):
+        """`Porsche 911` is two characters longer than `Carrera 4S` and says
+        nothing about which 911 it is. Length alone would rank it first."""
+        assert resolve_watchlist_key(
+            cfg, make="Porsche", model="911", variant="Carrera 4S", year=2014
+        ) == "porsche_911_carrera_s"
+
+    def test_the_japanese_model_code_picks_the_tier(self, cfg):
+        """The Japanese side never prints a trim, but the katashiki pins the
+        engine: 991MA104 is the 3.4 base, 991MA103 the 3.8 S."""
+        cases = {
+            "991MA104": "porsche_911_carrera",
+            "997MA102": "porsche_911_carrera",
+            "991MA103": "porsche_911_carrera_s",
+            "997MA101": "porsche_911_carrera_s",
+            "997M9701": "porsche_911_carrera_s",
+            "997MA170": "porsche_911_turbo",
+            "991MA175": "porsche_911_gt",
+        }
+        for code, expected in cases.items():
+            key = resolve_watchlist_key(
+                cfg, make="PORSCHE", model="911", model_code=code, year=2013
+            )
+            assert key == expected, f"{code} -> {key}"
+
+    def test_a_bare_911_falls_through_to_the_catch_all(self, cfg):
+        """No trim, no code -- so no tier. It must not silently pick one."""
+        assert resolve_watchlist_key(
+            cfg, make="PORSCHE", model="911", year=2013
+        ) == "porsche_911"
+
+    def test_the_991_2_codes_are_not_tiered(self, cfg):
+        """991H1/991J1 span Carrera through GTS on a single 2,981cc code, so
+        they carry no tier information and must not pretend to."""
+        for code in ("991H1", "991J1"):
+            assert resolve_watchlist_key(
+                cfg, make="PORSCHE", model="911", model_code=code, year=2016
+            ) == "porsche_911"
+
+    def test_an_untiered_911_is_priced_as_the_cheapest_thing_it_could_be(self, cfg):
+        """The catch-all redirects its comps to the base Carrera pool."""
+        assert cfg.watch_item("porsche_911").comps_from == "porsche_911_carrera"
+
+        jp = JpListing(
+            source="sbtjapan", source_ref="x", make="Porsche", model="911",
+            year=2013, mileage_km=60_000, price_usd=60_000,
+            steering=Steering.LHD, url="https://example.test/x",
+            watchlist_key="porsche_911",
+        )
+        base = ChListing(
+            source="autouncle", source_ref="b", make="Porsche", model="911",
+            variant="Carrera", year=2013, mileage_km=60_000, price_chf=76_500,
+            url="https://example.test/b", watchlist_key="porsche_911_carrera",
+        )
+        gt3 = ChListing(
+            source="autouncle", source_ref="g", make="Porsche", model="911",
+            variant="GT3", year=2013, mileage_km=60_000, price_chf=148_900,
+            url="https://example.test/g", watchlist_key="porsche_911_gt",
+        )
+        comps = find_comps(cfg, jp, [base, gt3])
+        assert [c.source_ref for c in comps] == ["b"]
+
+    def test_a_tier_does_not_borrow_another_tiers_comps(self, cfg):
+        jp = JpListing(
+            source="sbtjapan", source_ref="x", make="Porsche", model="911",
+            year=2013, mileage_km=60_000, price_usd=60_000,
+            steering=Steering.LHD, url="https://example.test/x",
+            watchlist_key="porsche_911_carrera",
+        )
+        gt3 = ChListing(
+            source="autouncle", source_ref="g", make="Porsche", model="911",
+            variant="GT3", year=2013, mileage_km=60_000, price_chf=148_900,
+            url="https://example.test/g", watchlist_key="porsche_911_gt",
+        )
+        assert find_comps(cfg, jp, [gt3]) == []

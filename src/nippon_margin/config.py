@@ -150,9 +150,13 @@ class RiskConfig(Base):
         if not location:
             return None
         aliases = {k.strip().upper(): v.strip().upper() for k, v in self.origin_aliases.items()}
-        # Try the whole string first, then the last comma-separated part:
-        # "Incheon, SOUTH KOREA" resolves on the tail, "Yokohama" on the whole.
-        for candidate in (location, location.split(",")[-1]):
+        # Widest match first, then progressively smaller tails:
+        #   "Yokohama"             -> the whole string is the alias
+        #   "Incheon, SOUTH KOREA" -> the comma tail is
+        #   "Aichi Japan"          -> only the last word is (goo-net's format)
+        # The last-word test is alias-only. It must not feed the fallback, or
+        # "New Zealand" would resolve to "ZEALAND".
+        for candidate in (location, location.split(",")[-1], location.split()[-1]):
             key = candidate.strip().upper()
             if key in aliases:
                 return aliases[key]
@@ -241,6 +245,14 @@ class WatchItem(Base):
     #: AutoUncle/Autolina URL slug when it differs from `model`
     #: (their SL lives at `mercedes-benz/sl-class`, not `.../sl`).
     ch_model_slug: str | None = None
+    #: `MAKE/MODEL` path on goo-net-exchange.com, whose slugs follow their own
+    #: convention (`MERCEDES_BENZ/G-CLASS`, `MASERATI/GRAN_TURISMO`).
+    goonet_path: str | None = None
+    #: Draw Swiss comps from another watchlist entry's pool instead of this
+    #: one's. For entries that exist because a tier could *not* be
+    #: established: an unknown 911 is priced against base Carreras, the
+    #: cheapest thing it could be, rather than against every 911 on the market.
+    comps_from: str | None = None
     #: Generation bounds. A model name outlives its generation -- "8 Series"
     #: is both a 1990 E31 and a 2025 M850i -- so an entry that wants one
     #: generation says so here rather than hoping the aliases are specific
@@ -266,14 +278,24 @@ class WatchItem(Base):
 
     def search_terms(self) -> list[str]:
         """Everything a JP or CH search page might call this car."""
-        terms = [f"{self.make} {self.model}", self.model, *self.aliases]
+        return [t for t, _ in self.scored_terms()]
+
+    def scored_terms(self) -> list[tuple[str, bool]]:
+        """`(term, is_alias)` pairs. An alias is more specific evidence.
+
+        `Porsche 911` is a longer string than `Carrera 4S` but says far less
+        about which 911 this is, so length alone cannot rank the two. The
+        flag lets the resolver prefer whichever entry matched on a trim.
+        """
+        generic = [f"{self.make} {self.model}", self.model]
+        pairs = [(t, False) for t in generic] + [(a, True) for a in self.aliases]
         seen: set[str] = set()
-        out: list[str] = []
-        for t in terms:
+        out: list[tuple[str, bool]] = []
+        for t, is_alias in pairs:
             k = t.lower().strip()
             if k and k not in seen:
                 seen.add(k)
-                out.append(t.strip())
+                out.append((t.strip(), is_alias))
         return out
 
 

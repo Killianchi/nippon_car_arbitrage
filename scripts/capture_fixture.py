@@ -28,6 +28,7 @@ KNOWN = {
     "au911": "https://www.autouncle.ch/en/used-cars/porsche/911",
     "beforward": "https://www.beforward.jp/stocklist/",
     "sbtjapan": "https://www.sbtjapan.com/used-cars/",
+    "goonet": "https://www.goo-net-exchange.com/usedcars/PORSCHE/911/index.html",
 }
 
 # Match the scraper: UA only. An explicit Accept header trips beforward.jp's

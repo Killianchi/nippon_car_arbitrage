@@ -99,7 +99,7 @@ def resolve_watchlist_key(cfg: Config, *, make: str, model: str,
     haystack = normalise(" ".join(filter(None, [make, model, variant])))
     desc = normalise(description)
 
-    best: tuple[int, str] | None = None
+    best: tuple[tuple[int, int, int], str] | None = None
     for item in cfg.watchlist:
         # The make has to agree. Without this a BMW 3 Series "320i Gran
         # Turismo" matches the Maserati GranTurismo alias and gets priced
@@ -109,16 +109,21 @@ def resolve_watchlist_key(cfg: Config, *, make: str, model: str,
             continue
         if not item.year_ok(year):
             continue
-        for term in item.search_terms():
+        for term, is_alias in item.scored_terms():
             t = normalise(term)
             if not t:
                 continue
             if contains_phrase(haystack, t):
-                score = len(t) + 100  # title matches beat description matches
+                in_title = 1
             elif len(t) >= 4 and contains_phrase(desc, t):
-                score = len(t)
+                in_title = 0
             else:
                 continue
+            # Ranked most-decisive first: a title beats a description, a trim
+            # alias beats a bare model name, and only then does a longer term
+            # beat a shorter one. Length alone would rank "Porsche 911" over
+            # "Carrera 4S" -- two more characters and no idea which 911.
+            score = (in_title, int(is_alias), len(t))
             if best is None or score > best[0]:
                 best = (score, item.key)
     return best[1] if best else None
@@ -187,6 +192,16 @@ def _trim_compatible(cfg: Config, jp: JpListing, ch: ChListing) -> bool:
     return jp_trim == ch_trim
 
 
+def _comp_key(cfg: Config, key: str | None) -> str | None:
+    """The pool a watchlist entry prices against -- itself, unless redirected.
+
+    One hop only: `comps_from` names a real tier, never another redirect, so
+    following it further would only invite a cycle.
+    """
+    item = cfg.watch_item(key) if key else None
+    return (item.comps_from or key) if item else key
+
+
 def _watch_terms(cfg: Config, key: str | None) -> tuple[WatchItem | None, set[str]]:
     item = cfg.watch_item(key) if key else None
     if not item:
@@ -206,7 +221,7 @@ def _same_model(cfg: Config, jp: JpListing, ch: ChListing) -> bool:
     make+model text overlap.
     """
     if jp.watchlist_key and ch.watchlist_key:
-        return jp.watchlist_key == ch.watchlist_key
+        return _comp_key(cfg, jp.watchlist_key) == _comp_key(cfg, ch.watchlist_key)
 
     mapped = cfg.resolve_model_code(jp.model_code)
     if mapped:

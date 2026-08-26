@@ -39,6 +39,10 @@ class AutoUncleAdapter(ChAdapter):
     base_url = "https://www.autouncle.ch"
 
     def search_urls(self) -> Iterable[str]:
+        # Several watch entries can share one AutoUncle page: the 911 tiers all
+        # live under /porsche/911 and are told apart by variant when parsed.
+        # Yielding the page once per entry would fetch it five times.
+        seen: set[str] = set()
         for item in self.cfg.watchlist:
             make = _slug(item.make)
             model = item.ch_model_slug or _slug(item.model)
@@ -46,7 +50,10 @@ class AutoUncleAdapter(ChAdapter):
                 continue
             for page in range(1, self.source_cfg.max_pages + 1):
                 suffix = "" if page == 1 else f"?page={page}"
-                yield f"{self.base_url}/en/used-cars/{make}/{model}{suffix}"
+                url = f"{self.base_url}/en/used-cars/{make}/{model}{suffix}"
+                if url not in seen:
+                    seen.add(url)
+                    yield url
 
     def parse_page(self, html: str, url: str) -> list[ChListing]:
         out: list[ChListing] = []
