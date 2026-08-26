@@ -160,8 +160,13 @@ risk:
   # different trade: different freight, different paperwork, and no auction
   # grading, so condition is unverifiable. Empty this list to buy anywhere.
   allowed_origins: ["JAPAN"]
-  # exportfrom.jp never prints a location and sells Japanese stock only, so
-  # dropping unknowns would discard it for nothing.
+  # Assume an unstated location means `assumed_origin` -- but only for a
+  # source that never states one. exportfrom.jp prints no location at all and
+  # sells Japanese stock only, so dropping its cars would discard good stock
+  # for nothing. BE FORWARD and SBT print a location on every car, much of it
+  # not in Japan; there a blank field is a gap in the scrape, not a Japanese
+  # car, and it is dropped rather than assumed. Set false to require a stated
+  # country from every source.
   allow_unknown_origin: true
   # Exporters print a city, a region or a country with no consistency, so a
   # raw token is not a country. Anything unmapped keeps its written form and

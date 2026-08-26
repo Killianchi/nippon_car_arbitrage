@@ -150,9 +150,13 @@ class RiskConfig(Base):
         if not location:
             return None
         aliases = {k.strip().upper(): v.strip().upper() for k, v in self.origin_aliases.items()}
-        # Try the whole string first, then the last comma-separated part:
-        # "Incheon, SOUTH KOREA" resolves on the tail, "Yokohama" on the whole.
-        for candidate in (location, location.split(",")[-1]):
+        # Widest match first, then progressively smaller tails:
+        #   "Yokohama"             -> the whole string is the alias
+        #   "Incheon, SOUTH KOREA" -> the comma tail is
+        #   "Aichi Japan"          -> only the last word is (goo-net's format)
+        # The last-word test is alias-only. It must not feed the fallback, or
+        # "New Zealand" would resolve to "ZEALAND".
+        for candidate in (location, location.split(",")[-1], location.split()[-1]):
             key = candidate.strip().upper()
             if key in aliases:
                 return aliases[key]

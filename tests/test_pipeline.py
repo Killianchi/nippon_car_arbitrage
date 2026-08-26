@@ -13,6 +13,7 @@ from nippon_margin.models import ChListing, FxRate, JpListing, ModelStats
 from nippon_margin.pipeline.alert import select_alerts
 from nippon_margin.pipeline.analyze import analyze, daily_stats, jp_price_moves, spread_moves
 from nippon_margin.pipeline.report import build_digest, render_markdown, weekly_portfolio
+from nippon_margin.pipeline.scrape import filter_by_origin
 from nippon_margin.store.sqlite_store import SqliteStore
 
 NOW = datetime(2025, 3, 15, tzinfo=UTC)
@@ -351,3 +352,105 @@ class TestOriginResolution:
             if cfg.risk.origin_allowed(cfg.risk.resolve_origin(lst.location))
         ]
         assert [lst.source_ref for lst in kept] == ["j"]
+
+
+class TestOriginFilterIsPerSource:
+    """If a site states countries, a blank one is missing data -- not Japan.
+
+    The listing-level rule alone would let a Korean car through on any source
+    that happened to drop the field on one row. The assumption is only safe
+    for a source that never publishes a location at all.
+    """
+
+    @staticmethod
+    def _jp(source: str, ref: str, location: str | None) -> JpListing:
+        return JpListing(
+            source=source, source_ref=ref, make="Porsche", model="911",
+            year=2013, mileage_km=60_000, price_usd=60_000,
+            location=location, url=f"https://example.test/{source}/{ref}",
+        )
+
+    def test_a_source_that_never_states_a_location_is_assumed_japanese(self, cfg):
+        """exportfrom.jp prints no location and sells Japanese stock only."""
+        jp = [self._jp("exportfrom", "a", None), self._jp("exportfrom", "b", None)]
+        kept, seen = filter_by_origin(cfg, jp)
+        assert len(kept) == 2
+        assert seen == {"not stated": 2}
+
+    def test_a_blank_location_on_a_source_that_states_them_is_dropped(self, cfg):
+        """The one that used to slip through: BE FORWARD publishes a location
+        on every car, most of it Korean. A missing one is a scrape gap."""
+        jp = [
+            self._jp("beforward", "a", "Yokohama"),
+            self._jp("beforward", "b", None),
+            self._jp("beforward", "c", "Korea"),
+        ]
+        kept, _ = filter_by_origin(cfg, jp)
+        assert [x.source_ref for x in kept] == ["a"]
+
+    def test_sources_are_judged_independently(self, cfg):
+        """One source stating locations must not disqualify another's blanks."""
+        jp = [
+            self._jp("beforward", "a", "Korea"),
+            self._jp("beforward", "b", None),
+            self._jp("exportfrom", "c", None),
+        ]
+        kept, _ = filter_by_origin(cfg, jp)
+        assert [x.source_ref for x in kept] == ["c"]
+
+    def test_a_stated_japanese_location_always_survives(self, cfg):
+        jp = [
+            self._jp("goonet", "a", "Aichi Japan"),
+            self._jp("sbtjapan", "b", "Tokyo, JAPAN"),
+        ]
+        kept, _ = filter_by_origin(cfg, jp)
+        assert len(kept) == 2
+
+    def test_the_master_switch_still_drops_every_unknown(self, cfg):
+        strict = cfg.model_copy(deep=True)
+        strict.risk.allow_unknown_origin = False
+        jp = [self._jp("exportfrom", "a", None), self._jp("goonet", "b", "Chiba Japan")]
+        kept, _ = filter_by_origin(strict, jp)
+        assert [x.source_ref for x in kept] == ["b"]
+
+    def test_an_empty_allow_list_filters_nothing(self, cfg):
+        anywhere = cfg.model_copy(deep=True)
+        anywhere.risk.allowed_origins = []
+        jp = [
+            self._jp("beforward", "a", "Korea"),
+            self._jp("beforward", "b", None),
+        ]
+        kept, seen = filter_by_origin(anywhere, jp)
+        assert len(kept) == 2
+        assert seen == {"SOUTH KOREA": 1, "not stated": 1}
+
+    def test_what_it_saw_is_reported_before_filtering(self, cfg):
+        """The log line is how an unmapped port gets noticed, so the tally has
+        to count everything, including what is about to be dropped."""
+        jp = [
+            self._jp("beforward", "a", "Yokohama"),
+            self._jp("beforward", "b", "Korea"),
+            self._jp("beforward", "c", "Busan"),
+        ]
+        _, seen = filter_by_origin(cfg, jp)
+        assert seen == {"JAPAN": 1, "SOUTH KOREA": 1, "BUSAN": 1}
+
+
+class TestOriginResolutionShapes:
+    """Every source writes a location its own way, and goo-net's has no comma."""
+
+    @pytest.mark.parametrize("location,expected", [
+        ("Aichi Japan", "JAPAN"),        # goo-net-exchange
+        ("Chiba Japan", "JAPAN"),
+        ("Tokyo, JAPAN", "JAPAN"),       # sbtjapan
+        ("Yokohama", "JAPAN"),           # beforward
+        ("Korea", "SOUTH KOREA"),
+    ])
+    def test_each_source_format_resolves(self, cfg, location, expected):
+        assert cfg.risk.resolve_origin(location) == expected
+
+    def test_the_last_word_rule_does_not_invent_countries(self, cfg):
+        """`New Zealand` must not resolve on `Zealand`; only aliases match on
+        the last word, and the fallback still reads the comma tail."""
+        assert cfg.risk.resolve_origin("New Zealand") == "NEW ZEALAND"
+        assert cfg.risk.origin_allowed(cfg.risk.resolve_origin("New Zealand")) is False

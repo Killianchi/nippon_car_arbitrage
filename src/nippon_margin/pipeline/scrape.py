@@ -29,6 +29,47 @@ log = logging.getLogger(__name__)
 ADAPTER_TIMEOUT_S = 8 * 60
 
 
+def filter_by_origin(cfg: Config, jp: list[JpListing]) -> tuple[list[JpListing], dict[str, int]]:
+    """Keep listings we are willing to buy from, and say what we saw.
+
+    The rule is per *source*, not per listing: **if a site states countries,
+    a listing from it with no country is missing data, not a Japanese car.**
+
+    Some exporters (exportfrom.jp) never print a location at all and sell
+    Japanese stock only -- for those, an unstated origin really does mean
+    `assumed_origin`, and dropping them would discard good stock for nothing.
+    But BE FORWARD and SBT print a location on every car, most of it not in
+    Japan. On a site like that, a blank field is a gap in the scrape, and
+    assuming Japan would quietly buy from Incheon.
+
+    `allow_unknown_origin` is the master switch for that assumption; the
+    source-level test decides where it is allowed to apply.
+    """
+    seen: dict[str, int] = {}
+    for lst in jp:
+        key = cfg.risk.resolve_origin(lst.location) or "not stated"
+        seen[key] = seen.get(key, 0) + 1
+
+    if not cfg.risk.allowed_origins:
+        return jp, seen
+
+    # Sources that publish a location for at least one car are held to it
+    # for all of them.
+    states_origin = {
+        lst.source for lst in jp if cfg.risk.resolve_origin(lst.location) is not None
+    }
+
+    kept = []
+    for lst in jp:
+        origin = cfg.risk.resolve_origin(lst.location)
+        if origin is not None:
+            if cfg.risk.origin_allowed(origin):
+                kept.append(lst)
+        elif lst.source not in states_origin and cfg.risk.allow_unknown_origin:
+            kept.append(lst)
+    return kept, seen
+
+
 async def run_adapter(adapter: Adapter) -> tuple[AdapterResult, list]:
     started = time.monotonic()
     try:
@@ -91,15 +132,7 @@ async def scrape(cfg: Config, store: Store, *, only: str | None = None,
 
     if cfg.risk.allowed_origins:
         before = len(jp)
-        seen_origins: dict[str, int] = {}
-        for lst in jp:
-            seen_origins[cfg.risk.resolve_origin(lst.location) or "not stated"] = (
-                seen_origins.get(cfg.risk.resolve_origin(lst.location) or "not stated", 0) + 1
-            )
-        jp = [
-            lst for lst in jp
-            if cfg.risk.origin_allowed(cfg.risk.resolve_origin(lst.location))
-        ]
+        jp, seen_origins = filter_by_origin(cfg, jp)
         log.info(
             "origin filter: kept %d/%d JP listings (allowed: %s); saw %s",
             len(jp), before, ", ".join(cfg.risk.allowed_origins),
