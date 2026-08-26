@@ -11,7 +11,13 @@ import pytest
 
 from nippon_margin.models import ChListing, FxRate, JpListing, ModelStats
 from nippon_margin.pipeline.alert import select_alerts
-from nippon_margin.pipeline.analyze import analyze, daily_stats, jp_price_moves, spread_moves
+from nippon_margin.pipeline.analyze import (
+    analyze,
+    daily_stats,
+    jp_price_moves,
+    rekey,
+    spread_moves,
+)
 from nippon_margin.pipeline.report import build_digest, render_markdown, weekly_portfolio
 from nippon_margin.pipeline.scrape import filter_by_origin
 from nippon_margin.store.sqlite_store import SqliteStore
@@ -454,3 +460,56 @@ class TestOriginResolutionShapes:
         the last word, and the fallback still reads the comma tail."""
         assert cfg.risk.resolve_origin("New Zealand") == "NEW ZEALAND"
         assert cfg.risk.origin_allowed(cfg.risk.resolve_origin("New Zealand")) is False
+
+
+class TestRekey:
+    """config.yaml is the source of truth for the whole catalog, not just for
+    the next scrape.
+
+    A listing's key is written when it is scraped and rewritten only when its
+    source is scraped again. Splitting the 911 into price tiers therefore left
+    55 stored Swiss cars keyed `porsche_911` under a config that no longer had
+    that meaning -- among them a GT3 that went on being priced as an ordinary
+    911.
+    """
+
+    def test_a_stale_key_is_recomputed(self):
+        from nippon_margin.config import load_config
+        cfg = load_config("config.yaml")
+        gt3 = ChListing(
+            source="autouncle", source_ref="g", make="Porsche", model="911",
+            variant="GT3", year=2017, mileage_km=25_000, price_chf=148_900,
+            url="https://example.test/g", watchlist_key="porsche_911",
+        )
+        assert rekey(cfg, [gt3])[0].watchlist_key == "porsche_911_gt"
+
+    def test_a_car_that_no_longer_matches_loses_its_key(self):
+        """A tightened generation window has to evict what it now excludes."""
+        from nippon_margin.config import load_config
+        cfg = load_config("config.yaml")
+        modern = ChListing(
+            source="autouncle", source_ref="m", make="Porsche", model="911",
+            variant="Carrera GTS", year=2025, mileage_km=5_000, price_chf=164_900,
+            url="https://example.test/m", watchlist_key="porsche_911",
+        )
+        assert rekey(cfg, [modern])[0].watchlist_key is None
+
+    def test_a_japanese_listing_is_rekeyed_from_its_model_code(self):
+        from nippon_margin.config import load_config
+        cfg = load_config("config.yaml")
+        jp = JpListing(
+            source="sbtjapan", source_ref="j", make="PORSCHE", model="911",
+            model_code="991MA104", year=2015, mileage_km=31_950, price_usd=62_800,
+            url="https://example.test/j", watchlist_key="porsche_911",
+        )
+        assert rekey(cfg, [jp])[0].watchlist_key == "porsche_911_carrera"
+
+    def test_a_correct_key_survives_untouched(self):
+        from nippon_margin.config import load_config
+        cfg = load_config("config.yaml")
+        ch = ChListing(
+            source="autouncle", source_ref="c", make="Porsche", model="911",
+            variant="Carrera 4S", year=2014, mileage_km=60_000, price_chf=87_400,
+            url="https://example.test/c", watchlist_key="porsche_911_carrera_s",
+        )
+        assert rekey(cfg, [ch])[0].watchlist_key == "porsche_911_carrera_s"

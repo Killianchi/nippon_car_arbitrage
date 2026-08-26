@@ -13,11 +13,43 @@ import statistics
 from datetime import UTC, date, datetime, timedelta
 
 from ..config import Config
-from ..matching import build_opportunity, mark_duplicates
+from ..matching import (
+    build_opportunity,
+    comp_pool_key,
+    mark_duplicates,
+    resolve_watchlist_key,
+)
 from ..models import ChListing, JpListing, ModelStats, Opportunity
 from ..store.base import Store
 
 log = logging.getLogger(__name__)
+
+
+def rekey(cfg: Config, listings: list) -> list:
+    """Re-resolve every stored listing's watchlist key against current config.
+
+    The key is written at scrape time, and a row is only rewritten when its
+    source is scraped again. So a watchlist change -- a new entry, a split
+    model, a tightened generation window -- would otherwise apply only to
+    cars seen since, leaving the rest of the catalog keyed under a config
+    that no longer exists. Splitting the 911 into price tiers left 55 Swiss
+    cars still keyed `porsche_911`, among them a GT3 that went on being
+    priced as an ordinary 911.
+
+    config.yaml is meant to be the source of truth for the whole catalog, not
+    just for the next scrape.
+    """
+    for lst in listings:
+        lst.watchlist_key = resolve_watchlist_key(
+            cfg,
+            make=lst.make,
+            model=lst.model,
+            model_code=getattr(lst, "model_code", None),
+            variant=lst.variant,
+            description=getattr(lst, "description", "") or "",
+            year=lst.year,
+        )
+    return listings
 
 
 def analyze(cfg: Config, store: Store, *, now: datetime | None = None) -> list[Opportunity]:
@@ -30,8 +62,8 @@ def analyze(cfg: Config, store: Store, *, now: datetime | None = None) -> list[O
             "`nippon-margin backfill --fx` to seed rates."
         )
 
-    jp_listings = store.active_jp()
-    ch_listings = store.active_ch()
+    jp_listings = rekey(cfg, store.active_jp())
+    ch_listings = rekey(cfg, store.active_ch())
     log.info("analyzing %d JP listings against %d CH listings at USD/CHF %.4f",
              len(jp_listings), len(ch_listings), fx.usd_chf)
 
@@ -46,7 +78,11 @@ def analyze(cfg: Config, store: Store, *, now: datetime | None = None) -> list[O
 
     opportunities: list[Opportunity] = []
     for jp in jp_listings:
-        pool = ch_by_key.get(jp.watchlist_key, []) + unkeyed if jp.watchlist_key else ch_listings
+        # An entry that could not establish its tier prices against another
+        # entry's pool (`comps_from`), so the lookup is by comp pool, not by
+        # the car's own key.
+        pool_key = comp_pool_key(cfg, jp.watchlist_key)
+        pool = ch_by_key.get(pool_key, []) + unkeyed if pool_key else ch_listings
         opp = build_opportunity(cfg, jp, pool, fx_usd_chf=fx.usd_chf, now=now)
         if not opp:
             continue
