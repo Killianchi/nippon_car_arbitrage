@@ -9,6 +9,7 @@ Re-capture a fixture with:
 """
 
 import gzip
+import re
 import statistics
 from pathlib import Path
 
@@ -152,16 +153,38 @@ class TestAutoUncle:
         assert "Zürich" in cantons or "Zug" in cantons
 
     def test_only_in_generation_911s_resolve_to_the_watch_entry(self, cfg, listings):
-        """The page mixes 996-991 cars with 992s. The watch entry wants
+        """The page mixes 996-991 cars with 992s. The watch entries want
         1998-2019, so the 992s must not become comps for a car we would buy."""
-        item = cfg.watch_item("porsche_911")
-        keyed = [x for x in listings if x.watchlist_key == "porsche_911"]
+        tiers = {"porsche_911", "porsche_911_carrera", "porsche_911_carrera_s",
+                 "porsche_911_turbo", "porsche_911_gt"}
+        keyed = [x for x in listings if x.watchlist_key in tiers]
         assert keyed, "no 911 resolved at all"
-        assert all(item.year_ok(x.year) for x in keyed)
+        assert all(cfg.watch_item(x.watchlist_key).year_ok(x.year) for x in keyed)
 
-        out_of_window = [x for x in listings if x.year and not item.year_ok(x.year)]
+        out_of_window = [
+            x for x in listings
+            if x.year and not cfg.watch_item("porsche_911").year_ok(x.year)
+        ]
         assert out_of_window, "fixture no longer contains an out-of-generation car"
         assert all(x.watchlist_key is None for x in out_of_window)
+
+    def test_911_variants_land_in_their_own_price_tier(self, listings):
+        """A GT3 and a base Carrera must not share a comp pool: on this very
+        page they are CHF 148,900 and CHF 34,900."""
+        by_tier: dict[str, set[str]] = {}
+        for lst in listings:
+            if lst.watchlist_key and lst.watchlist_key.startswith("porsche_911"):
+                by_tier.setdefault(lst.watchlist_key, set()).add(lst.variant or "")
+
+        assert "porsche_911_gt" in by_tier
+        assert all("GT3" in v or "GT2" in v for v in by_tier["porsche_911_gt"])
+
+        assert "porsche_911_turbo" in by_tier
+        assert all("Turbo" in v for v in by_tier["porsche_911_turbo"])
+
+        # The base tier is base cars only -- no S, no GTS, no Turbo, no GT.
+        for variant in by_tier.get("porsche_911_carrera", set()):
+            assert not re.search(r"\b(4S|S|GTS|Turbo|GT3|GT2)\b", variant), variant
 
     def test_year_and_mileage_are_parsed(self, listings):
         assert sum(1 for x in listings if x.year) >= 20

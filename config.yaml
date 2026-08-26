@@ -262,7 +262,10 @@ sources:
   switzerland:
     # AutoUncle aggregates AutoScout24 + Autolina + comparis and exposes
     # days-listed and price-change history -- the highest value single source.
-    autouncle:  { enabled: true,  max_pages: 4,  renderer: "http" }
+    # Deeper than it looks: the 911 alone splits into four price tiers, and a
+    # tier needs its own comps. Four pages left most tiers with one comp or
+    # none once the year and mileage windows were applied.
+    autouncle:  { enabled: true,  max_pages: 8,  renderer: "http" }
     autolina:   { enabled: false, max_pages: 3,  renderer: "http" }
     carforyou:  { enabled: false, max_pages: 3,  renderer: "http" }
     tutti:      { enabled: false, max_pages: 3,  renderer: "http" }
@@ -286,12 +289,33 @@ watchlist:
     min_grade: 4.0
     risk_notes: ["Check for CH-specific particulate filter compliance on pre-2015 diesels"]
 
-  - key: porsche_911
+  # --- 911, split by tier ------------------------------------------------
+  # A base Carrera and a GT3 are the same "model" and a CHF 70k different car.
+  # Pooled, the Swiss comps for a 2011-2019 911 run from CHF 63,900 to
+  # CHF 152,888, so a base Carrera priced against the pooled p25 shows a margin
+  # that belongs to a GT3 -- and a Turbo priced against the same pool shows a
+  # loss that belongs to a Carrera S. The tiers below are the price bands the
+  # Swiss market actually trades in (2011+ medians: Carrera 76.5k, S/GTS 87.4k,
+  # Turbo 115.7k, GT3 148.9k).
+  #
+  # The Japanese side never prints a trim, but it does print the katashiki
+  # (型式), which pins the engine and therefore the tier. Codes below were
+  # read off the Japanese type catalogue, not inferred:
+  #   991MA104  3,436cc  Carrera / Carrera 4 / Targa 4
+  #   991MA103  3,799cc  Carrera S / 4S / GTS / 4 GTS / Targa 4S
+  #   997MA102  3,613cc  Carrera / Carrera 4 / Targa 4
+  #   997MA101  3,799cc  Carrera S / 4S / Targa 4S
+  #   997M9701  3,824cc  Carrera S / 4S / Targa 4S
+  #   997MA170  3,799cc  Turbo
+  #   991MA175  3,799cc  GT3 (4,000cc 911 R)
+  # 991H1/991J1 (the 2,981cc 991.2) span Carrera through GTS on one code and
+  # so cannot be tiered -- they stay in the catch-all below.
+  - key: porsche_911_carrera
     make: Porsche
-    model: "911"
-    aliases: ["996", "997", "991", "Carrera", "Turbo S", "GT3"]
-    model_codes: ["997M9701", "997M9702", "996", "991", "997"]
-    # 996 (1998) through 991 (2019); excludes the current 992.
+    model: "911 Carrera"
+    aliases: ["Carrera", "Carrera 4", "Targa 4", "Carrera Cabriolet", "Carrera 4 Cabriolet"]
+    model_codes: ["991MA104", "997MA102", "99603", "99666K"]
+    ch_model_slug: "911"
     year_min: 1998
     year_max: 2019
     body: coupe
@@ -301,6 +325,85 @@ watchlist:
     risk_notes:
       - "997.1: bore scoring inspection mandatory before bidding"
       - "996: IMS bearing history required"
+
+  - key: porsche_911_carrera_s
+    make: Porsche
+    model: "911 Carrera S"
+    # S, 4S and GTS share a katashiki and trade within ~7% of each other in
+    # Switzerland, so they are one tier rather than three thin ones.
+    aliases:
+      - "Carrera S"
+      - "Carrera 4S"
+      - "Carrera GTS"
+      - "Carrera 4 GTS"
+      - "Carrera 4S Cabriolet"
+      - "Carrera S Cabriolet"
+      - "Carrera GTS Cabriolet"
+      - "Carrera 4 GTS Cabriolet"
+      - "Targa 4S"
+      - "Targa 4 GTS"
+    model_codes: ["991MA103", "997MA101", "997M9701", "997M9702", "996S64"]
+    ch_model_slug: "911"
+    year_min: 1998
+    year_max: 2019
+    body: coupe
+    max_km: 120000
+    min_grade: 4.0
+    homologation_mfk_chf: 2500
+    risk_notes:
+      - "997.1: bore scoring inspection mandatory before bidding"
+
+  - key: porsche_911_turbo
+    make: Porsche
+    model: "911 Turbo"
+    aliases: ["Turbo", "Turbo S", "Turbo Cabriolet", "Turbo S Cabriolet"]
+    model_codes: ["997MA170", "997MA170S", "997MA101S", "991MA171", "99770", "99705"]
+    ch_model_slug: "911"
+    year_min: 1998
+    year_max: 2019
+    body: coupe
+    max_km: 100000
+    min_grade: 4.0
+    homologation_mfk_chf: 2500
+    risk_notes:
+      - "Turbo and Turbo S are a CHF 25k spread; confirm which before bidding"
+
+  - key: porsche_911_gt
+    make: Porsche
+    model: "911 GT3"
+    aliases: ["GT3", "GT3 RS", "GT2", "GT2 RS", "911 R", "Speedster"]
+    model_codes: ["991MA175", "997M9777", "997N9701"]
+    ch_model_slug: "911"
+    year_min: 1998
+    year_max: 2019
+    body: coupe
+    max_km: 80000
+    min_grade: 4.5
+    homologation_mfk_chf: 3500
+    risk_notes:
+      - "GT cars are numbers-matching sensitive; a track history kills the premium"
+      - "Swiss GT3 comps are thin -- treat any single-comp price as indicative"
+
+  # Catch-all for 911s whose tier cannot be established: no katashiki, or a
+  # 991.2 code that spans Carrera through GTS. Priced against the *base*
+  # Carrera pool, because an unknown 911 is worth the cheapest thing it could
+  # be -- see `comps_from`.
+  - key: porsche_911
+    make: Porsche
+    model: "911"
+    aliases: []
+    model_codes: ["991H1", "991H2", "991J1", "991J2", "991J3", "991J4", "996", "991", "997"]
+    comps_from: porsche_911_carrera
+    ch_model_slug: "911"
+    year_min: 1998
+    year_max: 2019
+    body: coupe
+    max_km: 120000
+    min_grade: 4.0
+    homologation_mfk_chf: 2500
+    risk_notes:
+      - "Trim tier unknown -- priced as a base Carrera, the cheapest it could be"
+      - "997.1: bore scoring inspection mandatory before bidding"
 
   - key: porsche_cayenne
     make: Porsche
