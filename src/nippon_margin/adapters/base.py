@@ -142,6 +142,8 @@ class JpAdapter(Adapter):
                 variant=listing.variant,
                 description=listing.description,
                 year=listing.year,
+                engine_cc=listing.engine_cc,
+                transmission=listing.transmission,
             )
         return listing
 
@@ -158,5 +160,7 @@ class ChAdapter(Adapter):
                 model=listing.model,
                 variant=listing.variant,
                 year=listing.year,
+                engine_cc=listing.engine_cc,
+                transmission=listing.transmission,
             )
         return listing

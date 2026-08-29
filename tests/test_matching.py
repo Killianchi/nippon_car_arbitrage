@@ -746,3 +746,57 @@ class TestCompsFromIsOneDirectional:
         assert comp_pool_key(cfg, "porsche_911_carrera") == "porsche_911_carrera"
         assert comp_pool_key(cfg, "porsche_911_gt") == "porsche_911_gt"
         assert comp_pool_key(cfg, None) is None
+
+
+class TestEngineAndGearboxTiers:
+    """Some models are separated by displacement and gearbox and by nothing
+    else. Every Swiss Audi R8 is a "Coupé" whether it is the 4.2 V8 or the
+    5.2 V10, and the gated manual looks identical to the S tronic in every
+    field a listing publishes except the gearbox.
+    """
+
+    def _key(self, cfg, **kw):
+        base = dict(make="Audi", model="R8", variant="Coupé", year=2012)
+        return resolve_watchlist_key(cfg, **{**base, **kw})
+
+    def test_displacement_picks_the_engine_tier(self, cfg):
+        assert self._key(cfg, engine_cc=4200) == "audi_r8_v8"
+        assert self._key(cfg, engine_cc=5200) == "audi_r8_v10"
+
+    def test_the_manual_v10_outranks_the_plain_v10(self, cfg):
+        assert self._key(cfg, engine_cc=5200, transmission="Manual") == "audi_r8_v10_manual"
+
+    def test_an_automatic_v10_is_never_the_manual_tier(self, cfg):
+        assert self._key(cfg, engine_cc=5200, transmission="Automatic") == "audi_r8_v10"
+
+    def test_an_unstated_gearbox_falls_to_the_commoner_car(self, cfg):
+        """Absence of a gearbox is not evidence of a manual, and the manual is
+        the rarer, dearer car. Guessing it would inflate the margin."""
+        assert self._key(cfg, engine_cc=5200, transmission=None) == "audi_r8_v10"
+
+    def test_an_unstated_engine_is_not_guessed(self, cfg):
+        """The entry's whole identity is the engine, so an unstated one loses
+        the listing rather than picking one of two cars CHF 50k apart."""
+        assert self._key(cfg, engine_cc=None) is None
+
+    def test_a_manual_v8_is_still_a_v8(self, cfg):
+        """Only the V10 manual was asked for; a manual V8 must not fall
+        through into the V10 manual tier on gearbox alone."""
+        assert self._key(cfg, engine_cc=4200, transmission="Manual") == "audi_r8_v8"
+
+    def test_the_manual_tier_ends_with_the_type_42(self, cfg):
+        """The 4S is S tronic only, so a 2020 manual V10 does not exist and
+        must not be invented."""
+        assert self._key(cfg, engine_cc=5200, transmission="Manual", year=2020) == "audi_r8_v10"
+
+    def test_the_v8_window_excludes_the_4s_years(self, cfg):
+        assert self._key(cfg, engine_cc=4200, year=2020) is None
+
+    def test_gates_do_not_leak_into_unrelated_models(self, cfg):
+        """A 911 declares no engine band, so stating a displacement must not
+        change where it lands."""
+        for cc in (None, 3400, 3800):
+            assert resolve_watchlist_key(
+                cfg, make="Porsche", model="911", variant="Carrera 4S",
+                year=2014, engine_cc=cc,
+            ) == "porsche_911_carrera_s"

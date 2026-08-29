@@ -142,6 +142,9 @@ class AutoUncleAdapter(ChAdapter):
             year=year,
             mileage_km=mileage,
             price_chf=price_chf,
+            engine_cc=_engine_cc(card_text),
+            power_hp=_power_hp(card_text),
+            transmission=_transmission(card_text),
             days_listed=days_listed,
             price_change_history=history,
             seller_type=seller,
@@ -149,6 +152,40 @@ class AutoUncleAdapter(ChAdapter):
             ch_fahrzeug=True if re.search(r"CH[- ]Fahrzeug|Swiss delivery", card_text, re.I) else None,
             url=self.absolute(href),
         )
+
+
+# --------------------------------------------------------------------------
+# The spec strip. AutoUncle renders it without separators, so the card text
+# reads "...CoupeAutomatic611 HP (449 kW)..." -- word-boundary anchors do not
+# hold here and these read the shapes instead.
+#
+# These three fields are the only thing separating some cars: an Audi R8's
+# variant is "Coupe Advanced" whether it is the 4.2 V8 or the 5.2 V10, a
+# CHF 50k difference, and the gated manual is a further premium the variant
+# never mentions.
+def _engine_cc(card_text: str) -> int | None:
+    """`5.2L Petrol` -> 5200."""
+    m = re.search(r"(\d\.\d)\s*L\s*(?:Petrol|Diesel|Hybrid)", card_text, re.I)
+    if not m:
+        return None
+    cc = int(round(float(m.group(1)) * 1000))
+    return cc if 500 <= cc <= 9000 else None
+
+
+def _power_hp(card_text: str) -> int | None:
+    """`611 HP (449 kW)` -> 611. The kW parenthetical anchors it, so the
+    horsepower in the *title* is not double-counted."""
+    m = re.search(r"(\d{2,4})\s*HP\s*\(", card_text)
+    if not m:
+        return None
+    hp = int(m.group(1))
+    return hp if 20 <= hp <= 2000 else None
+
+
+def _transmission(card_text: str) -> str | None:
+    if re.search(r"Manual", card_text):
+        return "Manual"
+    return "Automatic" if re.search(r"Automatic", card_text) else None
 
 
 # --------------------------------------------------------------------------

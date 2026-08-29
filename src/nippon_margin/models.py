@@ -168,6 +168,14 @@ class ChListing(Base):
     mileage_km: int | None = None
     price_chf: float | None = None
 
+    #: Engine and gearbox, where the Swiss card states them. Some models are
+    #: told apart by these and by nothing else: an Audi R8's Swiss variant
+    #: field reads "Coupe Advanced", which says nothing about whether it is
+    #: the 4.2 V8 or the 5.2 V10 -- a CHF 50k difference.
+    engine_cc: int | None = None
+    power_hp: int | None = None
+    transmission: str | None = None
+
     days_listed: int | None = None
     price_change_history: list[PricePoint] = Field(default_factory=list)
     seller_type: SellerType = SellerType.UNKNOWN
