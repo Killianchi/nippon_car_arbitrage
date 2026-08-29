@@ -370,3 +370,72 @@ class TestGooNetTitleParsing:
 
     def test_a_grade_that_is_only_the_model_yields_no_trim(self):
         assert _variant("911", "911") is None
+
+
+class TestAudiR8Tiers:
+    """The R8 is two cars in one name, and the name never says which.
+
+    Every Swiss R8 is a "Coupé", optionally with an equipment line, whether it
+    is the 4.2 V8 or the 5.2 V10 -- a CHF 50k difference. So these tier on
+    displacement, which both sides publish, and the gated manual on gearbox.
+    """
+
+    @pytest.fixture(scope="class")
+    def ch(self, cfg):
+        return adapter(AutoUncleAdapter, cfg).parse_page(fixture("aur8"), "x")
+
+    @pytest.fixture(scope="class")
+    def jp(self, cfg):
+        return adapter(GooNetAdapter, cfg).parse_page(fixture("goonetr8"), "x")
+
+    def test_the_swiss_card_yields_engine_gearbox_and_power(self, ch):
+        assert len(ch) >= 20
+        assert sum(1 for x in ch if x.engine_cc) >= 20
+        assert sum(1 for x in ch if x.transmission) >= 20
+        assert sum(1 for x in ch if x.power_hp) >= 20
+        assert {x.engine_cc for x in ch if x.engine_cc} <= {4200, 5200}
+
+    def test_the_swiss_variant_alone_would_not_separate_them(self, ch):
+        """Both engines are sold under the same variant text -- which is why
+        the tier cannot be read off the trim the way a 911's can."""
+        by_variant = {}
+        for x in ch:
+            by_variant.setdefault(x.variant, set()).add(x.engine_cc)
+        assert any(len(v) > 1 for v in by_variant.values()), \
+            "fixture no longer has one variant name covering both engines"
+
+    def test_displacement_routes_each_car_to_its_tier(self, ch):
+        for x in ch:
+            if x.engine_cc == 4200:
+                assert x.watchlist_key == "audi_r8_v8"
+            elif x.engine_cc == 5200:
+                assert x.watchlist_key in {"audi_r8_v10", "audi_r8_v10_manual"}
+
+    def test_an_automatic_v10_never_lands_in_the_manual_tier(self, ch):
+        """The manual tier is rare enough that a page may hold none, so this
+        asserts the direction that must always hold. The manual and
+        unstated-engine cases are pinned in TestEngineAndGearboxTiers, which
+        does not depend on which page a rare car happens to fall on."""
+        for x in ch:
+            if x.transmission == "Automatic":
+                assert x.watchlist_key != "audi_r8_v10_manual"
+
+    def test_both_gearboxes_are_told_apart(self, ch):
+        boxes = {x.transmission for x in ch if x.transmission}
+        assert boxes <= {"Manual", "Automatic"}
+        assert "Automatic" in boxes
+
+    def test_the_japanese_side_tiers_on_the_same_field(self, jp):
+        assert len(jp) >= 10
+        assert {x.engine_cc for x in jp if x.engine_cc} <= {4200, 5200}
+        for x in jp:
+            if x.engine_cc == 4200 and x.watchlist_key:
+                assert x.watchlist_key == "audi_r8_v8"
+            if x.engine_cc == 5200 and x.watchlist_key:
+                assert x.watchlist_key in {"audi_r8_v10", "audi_r8_v10_manual"}
+
+    def test_both_tiers_are_actually_present_on_both_sides(self, ch, jp):
+        for side in (ch, jp):
+            keys = {x.watchlist_key for x in side}
+            assert "audi_r8_v8" in keys
+            assert "audi_r8_v10" in keys

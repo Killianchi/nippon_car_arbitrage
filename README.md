@@ -267,6 +267,26 @@ Two rules make it hold together:
 `comps_from` is general: any entry that exists because a tier could *not* be
 established should borrow the conservative pool rather than the whole one.
 
+Not every model tiers on a trim name. An Audi R8 is a 4.2 V8 or a 5.2 V10 --
+CHF 50k apart -- and **both are sold as a "Coupé"** on the Swiss side, with
+the equipment line ("Advanced", "Design", "Sport") saying nothing about the
+engine. Measured on the live Swiss pool: 34 V8s, 60 V10s, one variant name
+covering both. So an entry can also gate on `engine_cc_min`/`engine_cc_max`
+and on `transmission`, both of which the AutoUncle card and the goo-net card
+publish.
+
+Gates behave differently from trims, deliberately:
+
+* An **unstated gearbox** does not disqualify. It earns no specificity
+  either, so the car falls to the entry that declares none -- the automatic,
+  which is the commoner and cheaper car. Guessing a manual would inflate the
+  margin.
+* An **unstated displacement** *does* disqualify, wherever a band is
+  declared. An entry that tiers on the engine has the engine as its identity;
+  an unstated one would be a coin flip between two cars CHF 50k apart, so the
+  listing is dropped instead. Same safe direction as an unmapped origin: lose
+  stock rather than price the wrong car.
+
 ---
 
 ## Sources

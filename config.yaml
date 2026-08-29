@@ -419,6 +419,80 @@ watchlist:
       - "Trim tier unknown -- priced as a base Carrera, the cheapest it could be"
       - "997.1: bore scoring inspection mandatory before bidding"
 
+  # --- Audi R8 -----------------------------------------------------------
+  # The Swiss variant field is no help here: every R8 on AutoUncle is a
+  # "Coupe", optionally with an equipment line ("Coupe Advanced", "Coupe
+  # Design"), whichever engine is behind the seats. So these tier on
+  # displacement, which both sides publish -- goo-net prints 4200cc / 5200cc,
+  # and the AutoUncle card carries "4.2L Petrol" / "5.2L Petrol".
+  #
+  # Measured on the live Swiss pool (98 cars): 34 are the 4.2 V8, 60 the
+  # 5.2 V10. Power corroborates the split cleanly -- V8s read 420-430 HP,
+  # V10s 525-640 -- and never overlaps.
+  - key: audi_r8_v8
+    make: Audi
+    # Every source calls it an "R8"; nobody writes "R8 V8". The engine band
+    # below is what separates the entries -- the name cannot.
+    model: "R8"
+    aliases: ["4.2 FSI", "R8 V8", "V8"]
+    engine_cc_min: 4000
+    engine_cc_max: 4500
+    ch_model_slug: "r8-coupe"
+    goonet_path: "AUDI/R8"
+    # Type 42 only: the 4.2 V8 was dropped when the 4S arrived.
+    year_min: 2007
+    year_max: 2015
+    body: coupe
+    max_km: 120000
+    min_grade: 4.0
+    homologation_mfk_chf: 2500
+    risk_notes:
+      - "Type 42 V8: check the magnetic ride dampers, they are a known cost"
+
+  - key: audi_r8_v10
+    make: Audi
+    model: "R8"
+    aliases: ["5.2 FSI", "R8 V10", "V10", "V10 Plus", "V10 Performance"]
+    engine_cc_min: 5000
+    engine_cc_max: 5400
+    ch_model_slug: "r8-coupe"
+    goonet_path: "AUDI/R8"
+    year_min: 2009
+    year_max: 2025
+    body: coupe
+    max_km: 100000
+    min_grade: 4.0
+    homologation_mfk_chf: 2500
+    risk_notes:
+      - "V10 service costs are a step above the V8; budget the clutch on R tronic cars"
+
+  # The gated 6-speed. A separate entry because the Swiss market prices it as
+  # a separate car, and because the difference is invisible to every other
+  # field: same engine, same body, same equipment line. Only four manual V10s
+  # were in the Swiss pool when this was written (CHF 84,800-120,000 against
+  # a V10 pool that starts around CHF 60k), so expect a thin comp set and
+  # treat the number as indicative.
+  #
+  # The manual V10 is Type 42 only -- the 4S is S tronic exclusively.
+  - key: audi_r8_v10_manual
+    make: Audi
+    model: "R8"
+    aliases: ["5.2 FSI", "R8 V10", "V10", "V10 Plus"]
+    engine_cc_min: 5000
+    engine_cc_max: 5400
+    transmission: Manual
+    ch_model_slug: "r8-coupe"
+    goonet_path: "AUDI/R8"
+    year_min: 2009
+    year_max: 2015
+    body: coupe
+    max_km: 100000
+    min_grade: 4.0
+    homologation_mfk_chf: 2500
+    risk_notes:
+      - "Gated manual carries a premium; confirm the gearbox from photos, not the listing text"
+      - "Thin comps -- the Swiss manual V10 pool is a handful of cars"
+
   - key: porsche_cayenne
     goonet_path: "PORSCHE/CAYENNE"
     make: Porsche

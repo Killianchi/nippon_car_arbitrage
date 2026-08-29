@@ -85,22 +85,34 @@ def resolve_watchlist_key(cfg: Config, *, make: str, model: str,
                           model_code: str | None = None,
                           variant: str | None = None,
                           description: str = "",
-                          year: int | None = None) -> str | None:
+                          year: int | None = None,
+                          engine_cc: int | None = None,
+                          transmission: str | None = None) -> str | None:
     """Decide which watchlist entry a listing belongs to, or None.
 
     Model codes win when present -- `463276` is unambiguous where the free-text
     `G 63` on a Japanese page might be `G63 look-alike body kit`.
+
+    `engine_cc` and `transmission` are gates, not search terms: a stated value
+    outside an entry's band disqualifies it, an unstated one neither
+    disqualifies nor helps. They exist for models whose trim name carries no
+    engine -- every Swiss Audi R8 is a "Coupe", V8 and V10 alike.
     """
     if model_code:
         code = model_code.strip().upper()
         for item in cfg.watchlist:
-            if any(code == c.strip().upper() for c in item.model_codes) and item.year_ok(year):
+            if (
+                any(code == c.strip().upper() for c in item.model_codes)
+                and item.year_ok(year)
+                and item.engine_ok(engine_cc)
+                and item.transmission_ok(transmission)
+            ):
                 return item.key
 
     haystack = normalise(" ".join(filter(None, [make, model, variant])))
     desc = normalise(description)
 
-    best: tuple[tuple[int, int, int], str] | None = None
+    best: tuple[tuple[int, int, int, int], str] | None = None
     for item in cfg.watchlist:
         # The make has to agree. Without this a BMW 3 Series "320i Gran
         # Turismo" matches the Maserati GranTurismo alias and gets priced
@@ -110,6 +122,18 @@ def resolve_watchlist_key(cfg: Config, *, make: str, model: str,
             continue
         if not item.year_ok(year):
             continue
+        if not (item.engine_ok(engine_cc) and item.transmission_ok(transmission)):
+            continue
+        # How many of this entry's declared gates the listing positively
+        # satisfies. A manual R8 V10 clears both the V10 band and the manual
+        # requirement, so it outranks the plain V10 entry, which declares no
+        # gearbox. A car whose gearbox is unstated earns nothing here and
+        # falls to the plain entry -- the commoner, cheaper car.
+        gates = sum((
+            engine_cc is not None
+            and (item.engine_cc_min is not None or item.engine_cc_max is not None),
+            bool(transmission) and item.transmission is not None,
+        ))
         for term, is_alias in item.scored_terms():
             t = normalise(term)
             if not t:
@@ -121,10 +145,11 @@ def resolve_watchlist_key(cfg: Config, *, make: str, model: str,
             else:
                 continue
             # Ranked most-decisive first: a title beats a description, a trim
-            # alias beats a bare model name, and only then does a longer term
-            # beat a shorter one. Length alone would rank "Porsche 911" over
-            # "Carrera 4S" -- two more characters and no idea which 911.
-            score = (in_title, int(is_alias), len(t))
+            # alias beats a bare model name, a satisfied gate beats none, and
+            # only then does a longer term beat a shorter one. Length alone
+            # would rank "Porsche 911" over "Carrera 4S" -- two more
+            # characters and no idea which 911.
+            score = (in_title, int(is_alias), gates, len(t))
             if best is None or score > best[0]:
                 best = (score, item.key)
     return best[1] if best else None

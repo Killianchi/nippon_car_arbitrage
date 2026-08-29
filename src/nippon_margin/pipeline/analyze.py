@@ -48,6 +48,8 @@ def rekey(cfg: Config, listings: list) -> list:
             variant=lst.variant,
             description=getattr(lst, "description", "") or "",
             year=lst.year,
+            engine_cc=lst.engine_cc,
+            transmission=lst.transmission,
         )
     return listings
 

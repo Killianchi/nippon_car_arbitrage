@@ -26,6 +26,7 @@ KNOWN = {
     "exportfrom": "https://exportfrom.jp/stock-list/left-hand-cars",
     "carused": "https://carused.jp/car-list?steering=2",
     "au911": "https://www.autouncle.ch/en/used-cars/porsche/911",
+    "aur8": "https://www.autouncle.ch/en/used-cars/audi/r8-coupe",
     "beforward": "https://www.beforward.jp/stocklist/",
     "sbtjapan": "https://www.sbtjapan.com/used-cars/",
     "goonet": "https://www.goo-net-exchange.com/usedcars/PORSCHE/911/index.html",

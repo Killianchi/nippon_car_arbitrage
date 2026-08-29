@@ -245,6 +245,16 @@ class WatchItem(Base):
     #: AutoUncle/Autolina URL slug when it differs from `model`
     #: (their SL lives at `mercedes-benz/sl-class`, not `.../sl`).
     ch_model_slug: str | None = None
+    #: Engine displacement band, in cc. For models the trim name does not
+    #: separate: an Audi R8 is a 4.2 V8 or a 5.2 V10 and both are sold as
+    #: "Coupe Advanced". A listing that does not state a displacement is not
+    #: excluded -- absence is not evidence -- it simply does not earn the
+    #: specificity that a stated one does.
+    engine_cc_min: int | None = None
+    engine_cc_max: int | None = None
+    #: Required gearbox ("Manual"). For a variant the market prices as its own
+    #: car: the gated-manual R8 V10 is a different asset to the S tronic.
+    transmission: str | None = None
     #: `MAKE/MODEL` path on goo-net-exchange.com, whose slugs follow their own
     #: convention (`MERCEDES_BENZ/G-CLASS`, `MASERATI/GRAN_TURISMO`).
     goonet_path: str | None = None
@@ -263,6 +273,29 @@ class WatchItem(Base):
     min_grade: float | None = None
     homologation_mfk_chf: float | None = None
     risk_notes: list[str] = Field(default_factory=list)
+
+    def engine_ok(self, engine_cc: int | None) -> bool:
+        """Is the displacement inside this entry's band?
+
+        An entry that declares a band is one whose *identity* is the engine --
+        an R8 is a V8 or a V10 and the name says neither. So an unstated
+        displacement fails rather than passing, unlike an unstated year or
+        trim: we would otherwise be guessing which of two cars CHF 50k apart
+        this is. The safe direction is to lose the listing.
+        """
+        if self.engine_cc_min is None and self.engine_cc_max is None:
+            return True
+        if engine_cc is None:
+            return False
+        if self.engine_cc_min is not None and engine_cc < self.engine_cc_min:
+            return False
+        return not (self.engine_cc_max is not None and engine_cc > self.engine_cc_max)
+
+    def transmission_ok(self, transmission: str | None) -> bool:
+        """Does a stated gearbox match the one this entry requires?"""
+        if self.transmission is None or not transmission:
+            return True
+        return transmission.strip().lower() == self.transmission.strip().lower()
 
     def year_ok(self, year: int | None) -> bool:
         """Is a listing year inside this entry's generation window?
