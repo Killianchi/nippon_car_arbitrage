@@ -800,3 +800,54 @@ class TestEngineAndGearboxTiers:
                 cfg, make="Porsche", model="911", variant="Carrera 4S",
                 year=2014, engine_cc=cc,
             ) == "porsche_911_carrera_s"
+
+
+class TestATrimAliasNeedsItsModel:
+    """A trim alias only names this entry's car when the model is confirmed.
+
+    `Turbo` is a 911 Turbo alias and also the name of a Macan Turbo -- a
+    CHF 27k car against a CHF 116k one. Because an alias outranks a bare model
+    name (the rule that makes the 911 tiers work), every Macan Turbo was filed
+    under porsche_911_turbo: 23 Japanese and 20 Swiss cars when this was found.
+    The Swiss ones then became 911 Turbo comps at a median of CHF 26,845,
+    against a real 911 Turbo median of CHF 115,700.
+    """
+
+    def test_a_macan_turbo_is_a_macan(self, cfg):
+        assert resolve_watchlist_key(
+            cfg, make="Porsche", model="Macan", variant="Turbo", year=2016
+        ) == "porsche_macan"
+
+    def test_a_macan_turbo_performance_is_a_macan(self, cfg):
+        assert resolve_watchlist_key(
+            cfg, make="Porsche", model="Macan", variant="Turbo Performance Package", year=2018
+        ) == "porsche_macan"
+
+    def test_a_cayenne_turbo_is_a_cayenne(self, cfg):
+        assert resolve_watchlist_key(
+            cfg, make="Porsche", model="Cayenne", variant="Turbo", year=2012
+        ) == "porsche_cayenne"
+
+    def test_the_911_tiers_still_win_on_their_own_model(self, cfg):
+        """The gate must not cost the 911 its tiering: the head token `911` is
+        present in every one of these, so the alias stays decisive."""
+        cases = {
+            "Turbo S": "porsche_911_turbo",
+            "Carrera 4S": "porsche_911_carrera_s",
+            "Carrera GTS": "porsche_911_carrera_s",
+            "Carrera": "porsche_911_carrera",
+            "GT3 RS": "porsche_911_gt",
+        }
+        for variant, expected in cases.items():
+            got = resolve_watchlist_key(
+                cfg, make="Porsche", model="911", variant=variant, year=2014
+            )
+            assert got == expected, f"{variant} -> {got}"
+
+    def test_a_description_only_match_still_resolves(self, cfg):
+        """Some exporters put the model only in the body text. An alias that
+        cannot confirm its model is demoted, not discarded."""
+        assert resolve_watchlist_key(
+            cfg, make="Porsche", model="Coupe",
+            description="Rare 997 Carrera S, full history",
+        ) == "porsche_911_carrera_s"

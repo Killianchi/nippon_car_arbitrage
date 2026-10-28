@@ -231,53 +231,53 @@ class TestSbtPriceTerms:
     our freight entirely and understated landed cost by ~CHF 2,000 a car."""
 
     def test_the_vehicle_price_is_used_as_fob(self, cfg):
-        from selectolax.parser import HTMLParser
+        from selectolax.lexbor import LexborHTMLParser as HTMLParser
 
         from nippon_margin.adapters.jp.sbtjapan import SbtJapanAdapter
         from nippon_margin.models import PriceTerms
 
         html = """
-        <div class="card-product">
+        <div class="card-products">
           <a class="card-product__wrap" href="/used-cars/AB1234"></a>
           <h2 class="card-product__product">2015/3 PORSCHE 911 CARRERA</h2>
-          <div class="card-product__vehicle-price">Vehicle Price USD 25,340</div>
-          <div class="card-product__total-price">Total Price USD 27,053</div>
+          <div class="card-product__vehicle-prices">Vehicle Price USD 25,340</div>
+          <div class="card-product__total-prices">Total Price USD 27,053</div>
         </div>"""
         ad = SbtJapanAdapter(cfg, SourceConfig(enabled=True, max_pages=1), fetcher=None)
-        listing = ad._parse_card(HTMLParser(html).css_first(".card-product"))
+        listing = ad._parse_card(HTMLParser(html).css_first(".card-products"))
         assert listing.price_usd == 25_340
         assert listing.price_terms is PriceTerms.FOB
 
     def test_the_published_total_is_kept_for_reference(self, cfg):
-        from selectolax.parser import HTMLParser
+        from selectolax.lexbor import LexborHTMLParser as HTMLParser
 
         from nippon_margin.adapters.jp.sbtjapan import SbtJapanAdapter
 
         html = """
-        <div class="card-product">
+        <div class="card-products">
           <a class="card-product__wrap" href="/used-cars/AB1234"></a>
           <h2 class="card-product__product">2015/3 PORSCHE 911</h2>
-          <div class="card-product__vehicle-price">Vehicle Price USD 25,340</div>
-          <div class="card-product__total-price">Total Price USD 27,053</div>
+          <div class="card-product__vehicle-prices">Vehicle Price USD 25,340</div>
+          <div class="card-product__total-prices">Total Price USD 27,053</div>
         </div>"""
         ad = SbtJapanAdapter(cfg, SourceConfig(enabled=True, max_pages=1), fetcher=None)
-        listing = ad._parse_card(HTMLParser(html).css_first(".card-product"))
+        listing = ad._parse_card(HTMLParser(html).css_first(".card-products"))
         assert "SBT total price $27,053" in listing.description
 
     def test_an_ask_total_does_not_break_the_price(self, cfg):
-        from selectolax.parser import HTMLParser
+        from selectolax.lexbor import LexborHTMLParser as HTMLParser
 
         from nippon_margin.adapters.jp.sbtjapan import SbtJapanAdapter
 
         html = """
-        <div class="card-product">
+        <div class="card-products">
           <a class="card-product__wrap" href="/used-cars/AB1234"></a>
           <h2 class="card-product__product">2015/3 PORSCHE 911</h2>
-          <div class="card-product__vehicle-price">Vehicle Price USD 25,340</div>
-          <div class="card-product__total-price">Total Price Ask</div>
+          <div class="card-product__vehicle-prices">Vehicle Price USD 25,340</div>
+          <div class="card-product__total-prices">Total Price Ask</div>
         </div>"""
         ad = SbtJapanAdapter(cfg, SourceConfig(enabled=True, max_pages=1), fetcher=None)
-        listing = ad._parse_card(HTMLParser(html).css_first(".card-product"))
+        listing = ad._parse_card(HTMLParser(html).css_first(".card-products"))
         assert listing.price_usd == 25_340
 
 
@@ -439,3 +439,24 @@ class TestAudiR8Tiers:
             keys = {x.watchlist_key for x in side}
             assert "audi_r8_v8" in keys
             assert "audi_r8_v10" in keys
+
+
+class TestHtmlBackend:
+    """selectolax 1.0 removed the Modest backend on 2026-10-03 and the floor in
+    pyproject.toml had no upper bound, so the next morning's `pip install`
+    pulled 1.0.0 and every run died importing it -- 13 consecutive failures
+    before anyone noticed. The adapters use lexbor now; this keeps it that way.
+    """
+
+    def test_no_module_imports_the_removed_modest_backend(self):
+        root = Path(__file__).resolve().parents[1]
+        offenders = [
+            path.relative_to(root)
+            for path in (root / "src").rglob("*.py")
+            if "from selectolax.parser import" in path.read_text(encoding="utf-8")
+        ]
+        assert not offenders, f"Modest backend imported in: {offenders}"
+
+    def test_the_parser_in_use_is_lexbor(self):
+        from nippon_margin.adapters.base import Adapter
+        assert "Lexbor" in type(Adapter.dom("<p>x</p>")).__name__

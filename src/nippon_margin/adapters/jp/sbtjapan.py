@@ -96,7 +96,7 @@ class SbtJapanAdapter(JpAdapter):
 
     def parse_page(self, html: str, url: str) -> list[JpListing]:
         out: list[JpListing] = []
-        for card in self.dom(html).css(".card-product"):
+        for card in self.dom(html).css(".card-products"):
             listing = self._parse_card(card)
             if listing:
                 out.append(self.finish(listing))
@@ -133,8 +133,8 @@ class SbtJapanAdapter(JpAdapter):
         # landed cost by roughly CHF 2,000 a car. The vehicle price is the one
         # figure whose meaning is unambiguous, so it is treated as FOB and
         # costed with our own freight, exactly like the other two sources.
-        vehicle_price = _price_in(card, "card-product__vehicle-price")
-        total_price = _price_in(card, "card-product__total-price")
+        vehicle_price = _price_in(card, "card-product__vehicle-prices")
+        total_price = _price_in(card, "card-product__total-prices")
         price, terms = vehicle_price, PriceTerms.FOB
 
         specs = _spec_values(card)

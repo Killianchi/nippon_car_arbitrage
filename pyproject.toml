@@ -8,7 +8,8 @@ license = { text = "Proprietary" }
 
 dependencies = [
     "httpx[http2]>=0.27",
-    "selectolax>=0.3.21",
+    # 1.0 dropped the Modest backend; we use lexbor, which it requires.
+    "selectolax>=0.4.13",
     "beautifulsoup4>=4.12",
     "lxml>=5.2",
     "typer>=0.12",
