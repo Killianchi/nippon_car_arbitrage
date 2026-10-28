@@ -134,6 +134,17 @@ def resolve_watchlist_key(cfg: Config, *, make: str, model: str,
             and (item.engine_cc_min is not None or item.engine_cc_max is not None),
             bool(transmission) and item.transmission is not None,
         ))
+        # A trim alias only means this entry's car when the model is confirmed
+        # too. "Turbo" is a 911 Turbo alias and also the name of a Macan Turbo,
+        # a CHF 27k car against a CHF 116k one; without this, the alias boost
+        # filed every Macan Turbo under porsche_911_turbo -- in both
+        # directions, so the 911 Turbo comp pool took on Macan prices.
+        # The head token is what identifies the model ("911" of "911 Turbo"),
+        # not the full entry name, which no source writes out.
+        head = normalise(item.model).split()
+        model_seen = bool(head) and (
+            contains_phrase(haystack, head[0]) or contains_phrase(desc, head[0])
+        )
         for term, is_alias in item.scored_terms():
             t = normalise(term)
             if not t:
@@ -149,7 +160,7 @@ def resolve_watchlist_key(cfg: Config, *, make: str, model: str,
             # only then does a longer term beat a shorter one. Length alone
             # would rank "Porsche 911" over "Carrera 4S" -- two more
             # characters and no idea which 911.
-            score = (in_title, int(is_alias), gates, len(t))
+            score = (in_title, int(is_alias and model_seen), gates, len(t))
             if best is None or score > best[0]:
                 best = (score, item.key)
     return best[1] if best else None

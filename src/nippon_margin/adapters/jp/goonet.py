@@ -28,7 +28,7 @@ import json
 import re
 from collections.abc import Iterable
 
-from selectolax.parser import Node
+from selectolax.lexbor import LexborNode as Node
 
 from ...models import JpListing, PriceTerms
 from ...parse import (

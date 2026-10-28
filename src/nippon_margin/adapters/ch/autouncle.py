@@ -22,7 +22,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from selectolax.parser import Node
+from selectolax.lexbor import LexborNode as Node
 
 from ...models import ChListing, PricePoint, SellerType
 from ...parse import parse_mileage, parse_price, parse_year, text_of, to_int
