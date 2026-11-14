@@ -1,0 +1,54 @@
+name: watchdog
+
+# Checks the *published* dashboard and shouts if a reader would see nothing.
+#
+# This exists because the daily run's exit code has twice been a liar. On
+# 4 October it died before writing a run record, so nothing said "failed". On
+# 13 November it went green every day while publishing an empty page. Both were
+# found by a person noticing, days later.
+#
+# So this deliberately shares nothing with the pipeline: no catalog, no
+# database, no adapters. It fetches the deployed JSON over HTTP and asks
+# whether it still says anything. If the daily workflow is broken, renamed or
+# switched off, this still runs and still complains.
+#
+# It does share the Actions scheduler, which is the one failure it cannot see
+# past: if scheduled workflows stop firing for the repository, this stops too.
+# A truly independent check would have to live off GitHub.
+
+on:
+  schedule:
+    # 16:00 UTC. The daily cron asks for 05:00 but queues for hours on shared
+    # runners -- observed starts range from 09:00 to 13:40 -- so this leaves a
+    # wide margin before calling a run late.
+    - cron: "0 16 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: watchdog
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -e .
+
+      - name: Check the published dashboard
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          nippon-margin health \
+            --url "https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/data.json"

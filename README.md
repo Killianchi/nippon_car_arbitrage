@@ -378,6 +378,46 @@ rendering, pagination cut-off and error isolation are handled for you.
 
 ---
 
+## Watchdog
+
+The daily run's exit code has twice been a liar:
+
+| | what happened | how long |
+|---|---|---|
+| 4 Oct | `selectolax` 1.0 removed the backend the adapters import. The run died before writing a run record, so the catalog's own log just stopped and nothing reported a failure. | 13 days |
+| 13 Nov | AutoUncle redesigned and the Swiss `year` went `None`. Comps need a year on both sides, so all 451 opportunities scored zero and the export wrote an empty array — while every run reported `ok=True`. | 3 days |
+
+Both were found by a person noticing the page looked wrong. So there is a
+second workflow, `watchdog.yml`, that checks the **published** dashboard
+rather than the job that builds it:
+
+```bash
+nippon-margin health --url https://<owner>.github.io/<repo>/data.json
+```
+
+It shares nothing with the pipeline — no catalog, no database, no adapters —
+because a check that ran the same code would have passed on both those days.
+It fetches the deployed JSON and asks whether a reader would see anything:
+
+* **stale** — `generated_at` older than `health.max_age_hours` (36 by default;
+  the cron asks for 05:00 UTC and has started as late as 13:40, so one late
+  run must not page and two missed days must).
+* **empty** — fewer than `health.min_opportunities` rows published.
+* **no_comps** — rows published but not one has a Swiss comp. This is the
+  13 November shape: a page that looks populated and whose every margin is
+  meaningless.
+* **thin_sources** — opportunities from fewer than `health.min_sources`
+  Japanese adapters. Three have broken on site redesigns so far.
+
+A quiet market is not a fault; a market with no cars in it is. Failures exit
+non-zero and go to Telegram.
+
+The one failure it cannot see past is the Actions scheduler itself: it is a
+scheduled workflow in the same repository, so if schedules stop firing, this
+stops too. A genuinely independent check would have to live off GitHub.
+
+---
+
 ## Alerting
 
 Fires when any of these happen, each rate-limited by a per-key cooldown:

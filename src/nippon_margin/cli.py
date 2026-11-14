@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from pathlib import Path
 
 import typer
@@ -233,6 +234,71 @@ def export(
     finally:
         store.close()
     console.print(f"[green]wrote[/] {path} ({path.stat().st_size / 1024:.0f} KB)")
+
+
+@app.command()
+def health(
+    url: str = typer.Option(
+        "", "--url",
+        help="Published data.json to check. Defaults to the Pages URL for this repo.",
+    ),
+    snapshot: Path | None = typer.Option(
+        None, "--snapshot", help="Check a local file instead of fetching."
+    ),
+    alert: bool = typer.Option(True, "--alert/--no-alert", help="Send Telegram on failure."),
+    config_path: str = typer.Option("config.yaml", "--config", "-c"),
+    verbose: bool = typer.Option(False, "--verbose", "-v"),
+):
+    """Check the *published* dashboard and exit non-zero if it is broken.
+
+    Deliberately reads the deployed JSON over HTTP rather than the local
+    catalog: every outage so far was a green run that published nothing, so a
+    check that shares the pipeline's code or database would have passed too.
+    """
+    import httpx
+
+    from .alerting import telegram
+    from .pipeline.health import check_snapshot, describe, load
+
+    _configure_logging(verbose)
+    cfg = load_config(config_path)
+
+    target = url or os.environ.get("DASHBOARD_URL", "")
+    if snapshot is not None:
+        payload = load(snapshot.read_text(encoding="utf-8"))
+        where = str(snapshot)
+    elif target:
+        where = target
+        try:
+            response = httpx.get(target, timeout=30, follow_redirects=True)
+            response.raise_for_status()
+            payload = load(response.text)
+        except Exception as exc:  # noqa: BLE001 - an unreachable page is itself the finding
+            console.print(f"[red]unreachable[/] {target}: {exc}")
+            if alert and telegram.configured():
+                telegram.send(f"*nippon-margin watchdog* — dashboard unreachable\n\n{target}\n{exc}")
+            raise typer.Exit(code=1) from exc
+    else:
+        console.print("[red]no target[/] — pass --url or --snapshot, or set DASHBOARD_URL")
+        raise typer.Exit(code=2)
+
+    problems = check_snapshot(
+        payload,
+        max_age_hours=cfg.health.max_age_hours,
+        min_opportunities=cfg.health.min_opportunities,
+        min_sources=cfg.health.min_sources,
+    )
+    if not problems:
+        count = len(payload.get("opportunities") or [])
+        console.print(f"[green]healthy[/] {where} — {count} opportunities, "
+                      f"generated {payload.get('generated_at')}")
+        return
+
+    for problem in problems:
+        console.print(f"[red]{problem.code}[/] {problem.detail}")
+    if alert and telegram.configured():
+        telegram.send(describe(problems, url=where))
+    raise typer.Exit(code=1)
 
 
 sync_app = typer.Typer(no_args_is_help=True, help="Move the catalog to and from the `data` branch.")

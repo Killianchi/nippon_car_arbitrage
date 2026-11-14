@@ -216,6 +216,20 @@ risk:
   flag_penalty: 0.92
 
 # --- Alerting --------------------------------------------------------------
+# --- Watchdog --------------------------------------------------------------
+# Thresholds for the published-dashboard check. It reads the deployed JSON over
+# HTTP, outside the pipeline, because every outage so far was silent: the job
+# went green and the data was empty. See pipeline/health.py.
+health:
+  # The daily cron is 05:00 UTC but queues for hours on shared runners, so a
+  # single late run must not page. Two missed days must.
+  max_age_hours: 36
+  # Below this many published opportunities, something is wrong rather than
+  # quiet -- the catalog has carried 100+ for months.
+  min_opportunities: 5
+  # One surviving Japanese adapter means the others have stopped parsing.
+  min_sources: 2
+
 alerts:
   opportunity_score_threshold: 0.35
   min_margin_pct: 0.15
