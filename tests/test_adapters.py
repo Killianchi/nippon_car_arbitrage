@@ -170,22 +170,27 @@ class TestAutoUncle:
         assert all(x.watchlist_key is None for x in out_of_window)
 
     def test_911_variants_land_in_their_own_price_tier(self, listings):
-        """A GT3 and a base Carrera must not share a comp pool: on this very
-        page they are CHF 148,900 and CHF 34,900."""
-        by_tier: dict[str, set[str]] = {}
+        """A GT3 and a base Carrera must not share a comp pool.
+
+        Which tiers appear depends on what is in stock the day the fixture was
+        captured, so this asserts the invariant -- no tier ever holds a variant
+        belonging to another -- rather than requiring a rare car to be present.
+        TestPriceTiers pins the routing itself, independent of stock.
+        """
+        forbidden = {
+            "porsche_911_carrera": r"\b(4S|S|GTS|Turbo|GT3|GT2)\b",
+            "porsche_911_carrera_s": r"\b(Turbo|GT3|GT2)\b",
+            "porsche_911_turbo": r"\b(Carrera|GT3|GT2)\b",
+            "porsche_911_gt": r"\b(Carrera|Turbo)\b",
+        }
+        seen = set()
         for lst in listings:
-            if lst.watchlist_key and lst.watchlist_key.startswith("porsche_911"):
-                by_tier.setdefault(lst.watchlist_key, set()).add(lst.variant or "")
-
-        assert "porsche_911_gt" in by_tier
-        assert all("GT3" in v or "GT2" in v for v in by_tier["porsche_911_gt"])
-
-        assert "porsche_911_turbo" in by_tier
-        assert all("Turbo" in v for v in by_tier["porsche_911_turbo"])
-
-        # The base tier is base cars only -- no S, no GTS, no Turbo, no GT.
-        for variant in by_tier.get("porsche_911_carrera", set()):
-            assert not re.search(r"\b(4S|S|GTS|Turbo|GT3|GT2)\b", variant), variant
+            key = lst.watchlist_key
+            if key not in forbidden:
+                continue
+            seen.add(key)
+            assert not re.search(forbidden[key], lst.variant or ""), f"{key}: {lst.variant}"
+        assert len(seen) >= 2, f"fixture covers too few tiers to be meaningful: {seen}"
 
     def test_year_and_mileage_are_parsed(self, listings):
         assert sum(1 for x in listings if x.year) >= 20
@@ -460,3 +465,56 @@ class TestHtmlBackend:
     def test_the_parser_in_use_is_lexbor(self):
         from nippon_margin.adapters.base import Adapter
         assert "Lexbor" in type(Adapter.dom("<p>x</p>")).__name__
+
+
+class TestAutoUncleCardIntegrity:
+    """What the 13 November outage was: AutoUncle redesigned, four fields went
+    None, and the dashboard reported 0 cars while every run said ok=True.
+
+    The year is the fatal one -- find_comps rejects a comp whenever either
+    side's year is missing -- so a single parse regression on the sell side
+    zeroes the entire output silently. These assert the sell side keeps the
+    fields the engine cannot work without.
+    """
+
+    @pytest.fixture(scope="class")
+    def listings(self, cfg):
+        return adapter(AutoUncleAdapter, cfg).parse_page(fixture("au911"), "x")
+
+    def test_every_listing_has_a_year(self, listings):
+        """Without it every comp is rejected and the dashboard empties."""
+        assert len(listings) >= 20
+        missing = [x.url for x in listings if x.year is None]
+        assert not missing, f"{len(missing)} listings with no year"
+
+    def test_each_card_has_its_own_price(self, listings):
+        """The old ancestor walk resolved all 25 anchors to one node, so every
+        listing carried the same car's price and mileage."""
+        assert len({x.source_ref for x in listings}) == len(listings)
+        prices = [x.price_chf for x in listings if x.price_chf]
+        assert len(set(prices)) >= len(prices) - 1, "cards are sharing a price"
+        kms = [x.mileage_km for x in listings if x.mileage_km]
+        assert len(set(kms)) >= len(kms) - 1, "cards are sharing a mileage"
+
+    def test_the_asking_price_is_the_current_one(self, listings):
+        """A discounted card renders "CHF 56'850CHF 59'850" into one node.
+        Taking the wrong figure marks every cut car up to its pre-cut ask."""
+        cut = [x for x in listings if len(x.price_change_history) > 1]
+        assert cut, "fixture no longer contains a discounted listing"
+        for lst in cut:
+            previous, current = lst.price_change_history[0], lst.price_change_history[-1]
+            assert current.price == lst.price_chf
+            assert previous.price > current.price
+
+    def test_the_liquidity_fields_survive(self, listings):
+        """days_listed is 40% of the liquidity score; losing it silently
+        flattens every model's ranking rather than erroring."""
+        assert sum(1 for x in listings if x.days_listed is not None) >= 20
+        assert all(0 <= x.days_listed <= 2000 for x in listings if x.days_listed is not None)
+
+    def test_mileage_and_price_are_plausible(self, listings):
+        for lst in listings:
+            if lst.price_chf:
+                assert 5_000 < lst.price_chf < 2_000_000, lst.url
+            if lst.mileage_km:
+                assert 0 <= lst.mileage_km < 600_000, lst.url
