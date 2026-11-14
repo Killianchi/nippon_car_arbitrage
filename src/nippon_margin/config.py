@@ -178,6 +178,12 @@ class RiskConfig(Base):
     flag_penalty: float = 0.92
 
 
+class HealthConfig(Base):
+    max_age_hours: float = 36.0
+    min_opportunities: int = 5
+    min_sources: int = 2
+
+
 class EmailConfig(Base):
     smtp_host: str = ""
     smtp_port: int = 587
@@ -362,6 +368,7 @@ class Config(Base):
     scoring: ScoringConfig = Field(default_factory=ScoringConfig)
     risk: RiskConfig = Field(default_factory=RiskConfig)
     alerts: AlertsConfig = Field(default_factory=AlertsConfig)
+    health: HealthConfig = Field(default_factory=HealthConfig)
     sources: SourcesConfig = Field(default_factory=SourcesConfig)
     watchlist: list[WatchItem] = Field(default_factory=list)
     model_code_map: dict[str, ModelCodeEntry] = Field(default_factory=dict)
