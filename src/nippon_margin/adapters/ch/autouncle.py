@@ -29,6 +29,13 @@ from ...parse import parse_mileage, parse_price, parse_year, text_of, to_int
 from ..base import ChAdapter
 
 _DETAIL_HREF = re.compile(r"^/[a-z]{2}/d/\d+")
+# `/en/d/7131239-used-2008-audi-r8-coupe-advanced-420-bhp` -- the slug carries
+# the registration year and the power, per listing, and cannot be crossed with
+# a neighbouring card the way a DOM walk can. It is the most reliable thing on
+# the page, so it is read first and the card only fills the gaps.
+_DETAIL_SLUG = re.compile(
+    r"^/[a-z]{2}/d/(\d+)-(used|new)-((?:19|20)\d{2})-(.+?)(?:-(\d{2,4})-bhp)?/?$", re.I
+)
 _CHF = re.compile(r"CHF\s*([\d'’ .,]+)")
 # "8807 Freienbach, Schwyz" -> canton "Schwyz". Anchored: see _location_map.
 _CANTON = re.compile(r"^\d{4}\s+[^,]{2,30},\s*([A-Za-zÀ-ÿ.\- ]{2,30})$")
@@ -86,10 +93,18 @@ class AutoUncleAdapter(ChAdapter):
         if not title:
             return None
 
-        # "Used (2012) Porsche 911 Carrera S Cabriolet 400 HP | Good price"
+        # "Porsche 911 Carrera 385 HP | Good price" -- the year used to sit in
+        # the heading as "Used (2021)" and no longer does, so it comes from the
+        # URL slug, which carries it per listing.
         make, model, variant, year = _split_title(title)
+        slug = _DETAIL_SLUG.match(href)
+        slug_year = int(slug.group(3)) if slug else None
+        slug_hp = slug.group(5) if slug else None
+        year = year or slug_year
 
         card_text = text_of(card.text())
+        specs = _leaf_texts(card)
+        subtitle = _subtitle(card)
 
         # The card carries several CHF figures: the asking price, the previous
         # price when it has been cut, and a "Below market CHF 3'700" savings
@@ -100,15 +115,18 @@ class AutoUncleAdapter(ChAdapter):
         price_chf = prices[0] if prices else None
         previous_chf = prices[1] if len(prices) > 1 and prices[1] > prices[0] else None
 
-        mileage = None
-        for li in card.css("li"):
-            li_text = text_of(li.text())
-            if re.search(r"\bkm\b", li_text, re.I):
-                mileage = parse_mileage(li_text)
-                if mileage:
-                    break
+        mileage = _mileage_from(specs)
+        if mileage is None:
+            for li in card.css("li"):
+                li_text = text_of(li.text())
+                if re.search(r"\bkm\b", li_text, re.I):
+                    mileage = parse_mileage(li_text)
+                    if mileage:
+                        break
 
-        days_listed = _labelled_number(card_text, "Days listed")
+        days_listed = _definition_number(card, "days listed")
+        if days_listed is None:
+            days_listed = _labelled_number(card_text, "Days listed")
 
         # AutoUncle only prints a second CHF figure when the price was cut, so
         # "no second figure" means "no cut", not "unknown". Recording a single
@@ -142,9 +160,9 @@ class AutoUncleAdapter(ChAdapter):
             year=year,
             mileage_km=mileage,
             price_chf=price_chf,
-            engine_cc=_engine_cc(card_text),
-            power_hp=_power_hp(card_text),
-            transmission=_transmission(card_text),
+            engine_cc=_engine_cc(subtitle),
+            power_hp=_power_hp(title, slug_hp),
+            transmission=_transmission(specs),
             days_listed=days_listed,
             price_change_history=history,
             seller_type=seller,
@@ -155,48 +173,119 @@ class AutoUncleAdapter(ChAdapter):
 
 
 # --------------------------------------------------------------------------
-# The spec strip. AutoUncle renders it without separators, so the card text
-# reads "...CoupeAutomatic611 HP (449 kW)..." -- word-boundary anchors do not
-# hold here and these read the shapes instead.
+# The spec strip. Each card is a small, well-formed document: a heading, an
+# engine/gearbox sub-title, the prices, a row of spec spans, and a <dt>/<dd>
+# list for the market metrics. Reading the nodes beats reading the card's
+# concatenated text, which runs together with no separators -- "days listed"
+# followed by "67" and then "13.6 L/100km" flattens to "days listed6713.6".
 #
-# These three fields are the only thing separating some cars: an Audi R8's
-# variant is "Coupe Advanced" whether it is the 4.2 V8 or the 5.2 V10, a
-# CHF 50k difference, and the gated manual is a further premium the variant
-# never mentions.
-def _engine_cc(card_text: str) -> int | None:
-    """`5.2L Petrol` -> 5200."""
-    m = re.search(r"(\d\.\d)\s*L\s*(?:Petrol|Diesel|Hybrid)", card_text, re.I)
+# Engine and gearbox are the only thing separating some cars: an Audi R8's
+# variant is "Coupé Advanced" whether it is the 4.2 V8 or the 5.2 V10, a
+# CHF 50k difference, and the gated manual is a further premium.
+_SPEC_GEARBOX = {"automatic", "manual"}
+
+
+def _leaf_texts(card: Node) -> list[str]:
+    """Text of every leaf element in the card, in document order."""
+    out: list[str] = []
+    for node in card.css("*"):
+        if node.child is not None and node.child.tag != "-text":
+            continue
+        text = text_of(node.text())
+        if text:
+            out.append(text)
+    return out
+
+
+def _subtitle(card: Node) -> str:
+    """The engine/gearbox line under the heading: `4.2-V8 R-Tronic`, `Coupé 3.0 PDK`."""
+    for node in card.css("p"):
+        text = text_of(node.text())
+        if text and "CHF" not in text and not re.search(r"L/100km|g CO2", text):
+            return text
+    return ""
+
+
+def _engine_cc(subtitle: str) -> int | None:
+    """`4.2-V8 R-Tronic` -> 4200, `Coupé 3.0 PDK` -> 3000.
+
+    Read from the sub-title only. The card also carries a consumption figure
+    ("13.6 L/100km"), and a litres-anywhere match picks that up instead --
+    which is how a 4.2 V8 came out as a 13.6-litre engine.
+    """
+    m = re.search(r"(?<![\d.])(\d\.\d)(?![\d])", subtitle)
     if not m:
         return None
     cc = int(round(float(m.group(1)) * 1000))
     return cc if 500 <= cc <= 9000 else None
 
 
-def _power_hp(card_text: str) -> int | None:
-    """`611 HP (449 kW)` -> 611. The kW parenthetical anchors it, so the
-    horsepower in the *title* is not double-counted."""
-    m = re.search(r"(\d{2,4})\s*HP\s*\(", card_text)
+def _power_hp(title: str, slug_hp: str | None) -> int | None:
+    """Power from the URL slug when it is there, else `420 HP` in the heading."""
+    if slug_hp:
+        hp = int(slug_hp)
+        if 20 <= hp <= 2000:
+            return hp
+    m = re.search(r"(\d{2,4})\s*(?:HP|PS)\b", title, re.I)
     if not m:
         return None
     hp = int(m.group(1))
     return hp if 20 <= hp <= 2000 else None
 
 
-def _transmission(card_text: str) -> str | None:
-    if re.search(r"Manual", card_text):
-        return "Manual"
-    return "Automatic" if re.search(r"Automatic", card_text) else None
+def _transmission(specs: list[str]) -> str | None:
+    for text in specs:
+        if text.strip().lower() in _SPEC_GEARBOX:
+            return text.strip().title()
+    return None
+
+
+def _mileage_from(specs: list[str]) -> int | None:
+    for text in specs:
+        if re.fullmatch(r"[\d'’.,\s]{1,12}km", text.replace(" ", ""), re.I):
+            got = parse_mileage(text)
+            if got is not None:
+                return got
+    return None
+
+
+def _definition_number(card: Node, label: str) -> int | None:
+    """The `<dd>` paired with the `<dt>` carrying `label`.
+
+    The market metrics are a definition list -- below market / price change /
+    days listed -- strictly alternating, so pairing by document order is
+    enough and needs no sibling walk.
+    """
+    terms = [text_of(t.text()).strip().lower() for t in card.css("dt")]
+    values = [text_of(d.text()) for d in card.css("dd")]
+    wanted = label.strip().lower()
+    for term, value in zip(terms, values, strict=False):
+        if term == wanted:
+            return to_int(value)
+    return None
 
 
 # --------------------------------------------------------------------------
 def _card_for(anchor: Node, *, max_levels: int = 6, widen: int = 3) -> Node:
-    """Climb to the smallest ancestor that holds the whole card.
+    """The smallest ancestor that describes exactly one car.
 
-    The price, days-listed and location live as *siblings* of the detail
-    link, so the anchor alone is not enough. Once we have the price block we
-    widen a little further to pick up the seller/location strip -- but only
-    while the subtree still describes exactly one car.
+    AutoUncle now wraps each listing in its own `<article>`, which is a far
+    better boundary than any walk: one detail link, one price, one spec strip.
+    Anchor on it.
+
+    The old heuristic climbed until it saw "Days listed" beside a CHF figure.
+    The site relabelled that to lower-case "days listed", so the test stopped
+    firing, the walk ran its full six levels into the results grid, and every
+    anchor on the page resolved to the *same* node -- 25 listings sharing one
+    car's price and mileage. The fallback below keeps the walk for a layout
+    without articles, now matched case-insensitively.
     """
+    node: Node | None = anchor
+    while node is not None:
+        if node.tag == "article":
+            return node
+        node = node.parent
+
     node = anchor
     for _ in range(max_levels):
         parent = node.parent
@@ -204,13 +293,14 @@ def _card_for(anchor: Node, *, max_levels: int = 6, widen: int = 3) -> Node:
             break
         node = parent
         text = node.text() or ""
-        if "Days listed" in text and "CHF" in text:
+        if re.search(r"days listed", text, re.I) and "CHF" in text:
             for _ in range(widen):
                 nxt = node.parent
-                if nxt is None or (nxt.text() or "").count("Days listed") != 1:
+                if nxt is None or len(re.findall(r"(?i)days listed", nxt.text() or "")) != 1:
                     break
                 node = nxt
             return node
+    return node
     return node
 
 
@@ -218,10 +308,25 @@ _PRICE_ONLY = re.compile(r"^CHF\s*[\d'’ .,]+$")
 
 
 def _price_figures(card: Node) -> list[float]:
-    """Asking-price figures in DOM order, excluding badges inside buttons.
+    """Asking-price figures in DOM order: current ask first, pre-cut second.
 
-    First is the current ask; a larger second one is the pre-cut price.
+    A discounted card renders both into one paragraph with no separator --
+    "CHF 56'850CHF 59'850" -- while a sibling span repeats only the struck-out
+    old price. Matching whole-text-is-a-price nodes therefore found the *old*
+    price and nothing else, which marked every cut car up to its pre-cut ask.
+    Read the paragraph and take its figures in order.
     """
+    for node in card.css("p"):
+        text = text_of(node.text())
+        if not text or "CHF" not in text or _inside_button(node, card):
+            continue
+        figures = [parse_price(f"CHF {m}") for m in _CHF.findall(text)]
+        found = [f for f in figures if f and f > 500]
+        if len(found) >= 2:
+            return found
+        if found:
+            break
+
     out: list[float] = []
     for node in card.css("div,span,p"):
         text = text_of(node.text())
